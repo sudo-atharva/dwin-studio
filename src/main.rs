@@ -1,16 +1,18 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 //! DWIN Studio editor: design pages, build DWIN_SET for the SD card.
-//! Layout follows LVGL-style editors: screens + hierarchy left, canvas center, inspector right.
+//! Layout follows LVGL-style editors: screens / hierarchy / widgets / assets left,
+//! canvas center (zoom, pan, multi-select, align), inspector right, address map bottom.
 
 use dwin_studio::build::{allocate, build, Alloc, Output};
-use dwin_studio::project::{default_widgets, Page, Project, Widget, WidgetKind, PRESETS};
-use dwin_studio::render::{render, Mode};
-use eframe::egui::{self, Color32, CollapsingHeader, Key, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, Vec2};
+use dwin_studio::project::{default_widgets, Event, Page, Project, Widget, WidgetKind, PRESETS};
+use dwin_studio::render::{load_image, render, Mode};
+use eframe::egui::{self, Color32, CollapsingHeader, Key, PointerButton, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, Vec2};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-const GRID: i32 = 4;
 const HANDLE: f32 = 10.0;
 const ACCENT: Color32 = Color32::from_rgb(250, 180, 40);
+const IMAGE_EXT: &[&str] = &["png", "jpg", "jpeg", "bmp"];
 
 /// Write DWIN_SET, ui_gen.h and ui_map.txt into `dir`.
 fn write_output(o: &Output, dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
@@ -23,7 +25,8 @@ fn write_output(o: &Output, dir: &Path) -> Result<(), Box<dyn std::error::Error>
 /// `dwin-studio build <project.dwin.json> <out dir>`: headless build, prints warnings.
 fn cli_build(project: &str, out: &str) -> Result<(), Box<dyn std::error::Error>> {
     let p: Project = serde_json::from_str(&std::fs::read_to_string(project)?)?;
-    let o = build(&p)?;
+    let base = Path::new(project).parent().unwrap_or(Path::new("."));
+    let o = build(&p, base)?;
     write_output(&o, Path::new(out))?;
     for w in &o.warnings {
         eprintln!("warning: {w}");
@@ -47,7 +50,7 @@ fn main() -> eframe::Result {
     }
     let path = args.get(1).map(PathBuf::from);
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1440.0, 880.0]),
+        viewport: egui::ViewportBuilder::default().with_inner_size([1480.0, 900.0]),
         ..Default::default()
     };
     eframe::run_native(
@@ -63,16 +66,24 @@ fn main() -> eframe::Result {
     )
 }
 
-#[derive(Clone, Copy)]
-enum DragMode {
-    Move,
-    Resize,
+enum Drag {
+    /// Moving the selection: original rects.
+    Move { start: Pos2, orig: Vec<(usize, i32, i32)> },
+    Resize { start: Pos2, idx: usize, orig: (i32, i32) },
+    /// Rubber-band selection from this canvas position.
+    Box { start: Pos2 },
 }
 
-struct Drag {
-    mode: DragMode,
-    start: Pos2,
-    orig: (i32, i32, i32, i32),
+#[derive(Clone, Copy)]
+enum Align {
+    Left,
+    HCenter,
+    Right,
+    Top,
+    VCenter,
+    Bottom,
+    DistH,
+    DistV,
 }
 
 struct App {
@@ -80,11 +91,18 @@ struct App {
     path: Option<PathBuf>,
     build_dir: Option<PathBuf>,
     page: usize,
-    selected: Option<usize>,
+    selected: Vec<usize>,
+    clipboard: Vec<Widget>,
     undo: Vec<Project>,
     redo: Vec<Project>,
     drag: Option<Drag>,
     show_pressed: bool,
+    grid: i32,
+    /// None = fit to window.
+    zoom: Option<f32>,
+    pan: Vec2,
+    assets: Vec<String>,
+    thumbs: HashMap<String, egui::TextureHandle>,
     texture: Option<egui::TextureHandle>,
     rendered: Option<(Page, u16, u16, bool)>,
     status: String,
@@ -98,20 +116,44 @@ impl App {
             path: None,
             build_dir: None,
             page: 0,
-            selected: None,
+            selected: vec![],
+            clipboard: vec![],
             undo: vec![],
             redo: vec![],
             drag: None,
             show_pressed: false,
+            grid: 4,
+            zoom: None,
+            pan: Vec2::ZERO,
+            assets: vec![],
+            thumbs: HashMap::new(),
             texture: None,
             rendered: None,
-            status: "New project".into(),
+            status: "New project - save it to start importing images".into(),
             title: String::new(),
         };
         if let Some(p) = path {
             app.load(p);
         }
         app
+    }
+
+    /// Folder that image paths are relative to.
+    fn base(&self) -> PathBuf {
+        self.path.as_ref().and_then(|p| p.parent()).map_or(PathBuf::from("."), Path::to_path_buf)
+    }
+
+    fn refresh_assets(&mut self) {
+        let dir = self.base().join("assets");
+        let mut list: Vec<String> = std::fs::read_dir(&dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.path().extension().and_then(|x| x.to_str()).is_some_and(|x| IMAGE_EXT.contains(&x.to_lowercase().as_str())))
+            .map(|e| format!("assets/{}", e.file_name().to_string_lossy()))
+            .collect();
+        list.sort();
+        self.assets = list;
     }
 
     fn load(&mut self, p: PathBuf) {
@@ -124,26 +166,52 @@ impl App {
                 self.status = format!("Opened {}", p.display());
                 self.path = Some(p);
                 self.page = 0;
-                self.selected = None;
+                self.selected.clear();
                 self.undo.clear();
                 self.redo.clear();
+                self.refresh_assets();
             }
             Err(e) => self.status = format!("Open failed: {e}"),
         }
     }
 
-    fn save(&mut self, ask: bool) {
+    fn save(&mut self, ask: bool) -> bool {
         if ask || self.path.is_none() {
             let dlg = rfd::FileDialog::new().add_filter("DWIN Studio", &["json"]).set_file_name("project.dwin.json");
-            let Some(p) = dlg.save_file() else { return };
+            let Some(p) = dlg.save_file() else { return false };
             self.path = Some(p);
+            self.refresh_assets();
         }
         let p = self.path.clone().unwrap();
         let json = serde_json::to_string_pretty(&self.project).unwrap();
-        self.status = match std::fs::write(&p, json) {
-            Ok(()) => format!("Saved {}", p.display()),
-            Err(e) => format!("Save failed: {e}"),
-        };
+        match std::fs::write(&p, json) {
+            Ok(()) => {
+                self.status = format!("Saved {}", p.display());
+                true
+            }
+            Err(e) => {
+                self.status = format!("Save failed: {e}");
+                false
+            }
+        }
+    }
+
+    fn import_assets(&mut self) {
+        if self.path.is_none() && !self.save(true) {
+            self.status = "Save the project first: images are copied next to it in assets/".into();
+            return;
+        }
+        let Some(files) = rfd::FileDialog::new().add_filter("Images", IMAGE_EXT).pick_files() else { return };
+        let dir = self.base().join("assets");
+        let mut n = 0;
+        for f in files {
+            let Some(name) = f.file_name() else { continue };
+            if std::fs::create_dir_all(&dir).and_then(|_| std::fs::copy(&f, dir.join(name))).is_ok() {
+                n += 1;
+            }
+        }
+        self.status = format!("Imported {n} image(s) into {}", dir.display());
+        self.refresh_assets();
     }
 
     fn do_build(&mut self) {
@@ -151,7 +219,7 @@ impl App {
             self.build_dir = rfd::FileDialog::new().set_title("Folder to put DWIN_SET in").pick_folder();
         }
         let Some(dir) = self.build_dir.clone() else { return };
-        let result = build(&self.project).and_then(|o| write_output(&o, &dir).map(|_| o.warnings));
+        let result = build(&self.project, &self.base()).and_then(|o| write_output(&o, &dir).map(|_| o.warnings));
         self.status = match result {
             Ok(w) if w.is_empty() => format!("Built → {} (DWIN_SET, ui_gen.h, ui_map.txt)", dir.display()),
             Ok(w) => format!("Built with {} warning(s): {}", w.len(), w.join("; ")),
@@ -159,19 +227,97 @@ impl App {
         };
     }
 
-    fn page_mut(&mut self) -> &mut Page {
-        &mut self.project.pages[self.page]
+    fn widgets(&self) -> &Vec<Widget> {
+        &self.project.pages[self.page].widgets
+    }
+
+    fn widgets_mut(&mut self) -> &mut Vec<Widget> {
+        &mut self.project.pages[self.page].widgets
     }
 
     fn unique_name(&self, base: &str) -> String {
+        let base: String = base.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_lowercase();
+        let base = if base.is_empty() { "item".to_string() } else { base };
         let used = |n: &str| self.project.pages.iter().flat_map(|p| &p.widgets).any(|w| w.name == n);
-        (1..).map(|i| format!("{}{i}", base.to_lowercase())).find(|n| !used(n)).unwrap()
+        (1..).map(|i| format!("{base}{i}")).find(|n| !used(n)).unwrap()
+    }
+
+    fn add_widget(&mut self, mut w: Widget) {
+        w.name = self.unique_name(if w.name.is_empty() { w.kind_name() } else { &w.name });
+        self.widgets_mut().push(w);
+        self.selected = vec![self.widgets().len() - 1];
     }
 
     fn fix_selection(&mut self) {
         self.page = self.page.min(self.project.pages.len() - 1);
-        if self.selected.is_some_and(|s| s >= self.project.pages[self.page].widgets.len()) {
-            self.selected = None;
+        let n = self.widgets().len();
+        self.selected.retain(|&s| s < n);
+    }
+
+    fn paste(&mut self, items: Vec<Widget>) {
+        let start = self.widgets().len();
+        for mut w in items {
+            w.name = self.unique_name(&w.name.trim_end_matches(|c: char| c.is_ascii_digit()).to_string());
+            (w.x, w.y) = (w.x + 16, w.y + 16);
+            if let Some(vp) = w.kind.vp_mut() {
+                *vp = None; // a copy gets its own address
+            }
+            self.widgets_mut().push(w);
+        }
+        self.selected = (start..self.widgets().len()).collect();
+    }
+
+    fn align(&mut self, how: Align) {
+        let sel = self.selected.clone();
+        if sel.is_empty() {
+            return;
+        }
+        // One widget aligns to the screen, several to their bounding box.
+        let (l, t, r, b) = if sel.len() == 1 {
+            (0, 0, self.project.width as i32, self.project.height as i32)
+        } else {
+            let ws: Vec<_> = sel.iter().map(|&i| &self.widgets()[i]).collect();
+            (
+                ws.iter().map(|w| w.x).min().unwrap(),
+                ws.iter().map(|w| w.y).min().unwrap(),
+                ws.iter().map(|w| w.x + w.w).max().unwrap(),
+                ws.iter().map(|w| w.y + w.h).max().unwrap(),
+            )
+        };
+        let mut order = sel.clone();
+        match how {
+            Align::DistH | Align::DistV if sel.len() >= 3 => {
+                let horiz = matches!(how, Align::DistH);
+                order.sort_by_key(|&i| if horiz { self.widgets()[i].x } else { self.widgets()[i].y });
+                let total: i32 = order.iter().map(|&i| if horiz { self.widgets()[i].w } else { self.widgets()[i].h }).sum();
+                let gap = ((if horiz { r - l } else { b - t }) - total) / (order.len() as i32 - 1);
+                let mut pos = if horiz { l } else { t };
+                for i in order {
+                    let w = &mut self.widgets_mut()[i];
+                    if horiz {
+                        w.x = pos;
+                        pos += w.w + gap;
+                    } else {
+                        w.y = pos;
+                        pos += w.h + gap;
+                    }
+                }
+            }
+            Align::DistH | Align::DistV => self.status = "Distribute needs 3+ widgets selected".into(),
+            _ => {
+                for i in sel {
+                    let w = &mut self.widgets_mut()[i];
+                    match how {
+                        Align::Left => w.x = l,
+                        Align::HCenter => w.x = (l + r - w.w) / 2,
+                        Align::Right => w.x = r - w.w,
+                        Align::Top => w.y = t,
+                        Align::VCenter => w.y = (t + b - w.h) / 2,
+                        Align::Bottom => w.y = b - w.h,
+                        _ => {}
+                    }
+                }
+            }
         }
     }
 
@@ -179,51 +325,73 @@ impl App {
         if ctx.memory(|m| m.focused().is_some()) {
             return; // typing in a field
         }
-        let (undo, redo, del, dup, save, nudge) = ctx.input(|i| {
-            let c = i.modifiers.command;
-            let step = if i.modifiers.shift { 10 } else { 1 };
-            let mut n = (0, 0);
-            for (k, d) in [(Key::ArrowLeft, (-step, 0)), (Key::ArrowRight, (step, 0)), (Key::ArrowUp, (0, -step)), (Key::ArrowDown, (0, step))] {
-                if i.key_pressed(k) {
-                    n = d;
-                }
-            }
-            (c && i.key_pressed(Key::Z), c && i.key_pressed(Key::Y), i.key_pressed(Key::Delete), c && i.key_pressed(Key::D), c && i.key_pressed(Key::S), n)
-        });
-        if save {
+        let (c, shift) = ctx.input(|i| (i.modifiers.command, i.modifiers.shift));
+        let pressed = |k: Key| ctx.input(|i| i.key_pressed(k));
+        if c && pressed(Key::S) {
             self.save(false);
         }
-        if undo {
+        if c && pressed(Key::Z) {
             if let Some(p) = self.undo.pop() {
                 self.redo.push(std::mem::replace(&mut self.project, p));
                 self.fix_selection();
             }
         }
-        if redo {
+        if c && pressed(Key::Y) {
             if let Some(p) = self.redo.pop() {
                 self.undo.push(std::mem::replace(&mut self.project, p));
                 self.fix_selection();
             }
         }
-        let Some(s) = self.selected else { return };
-        if del {
-            self.page_mut().widgets.remove(s);
-            self.selected = None;
-        } else if dup {
-            let mut w = self.project.pages[self.page].widgets[s].clone();
-            w.name = self.unique_name(w.kind_name());
-            (w.x, w.y) = (w.x + 16, w.y + 16);
-            // A copy gets its own address; a fixed VP would clash.
-            match &mut w.kind {
-                WidgetKind::Button { vp, .. } | WidgetKind::Number { vp, .. } | WidgetKind::Text { vp, .. } => *vp = None,
-                _ => {}
-            }
-            self.page_mut().widgets.push(w);
-            self.selected = Some(self.project.pages[self.page].widgets.len() - 1);
-        } else if nudge != (0, 0) {
-            let w = &mut self.page_mut().widgets[s];
-            (w.x, w.y) = (w.x + nudge.0, w.y + nudge.1);
+        if c && pressed(Key::A) {
+            self.selected = (0..self.widgets().len()).collect();
         }
+        if c && pressed(Key::V) && !self.clipboard.is_empty() {
+            self.paste(self.clipboard.clone());
+        }
+        if self.selected.is_empty() {
+            return;
+        }
+        let picked: Vec<Widget> = self.selected.iter().map(|&i| self.widgets()[i].clone()).collect();
+        if c && pressed(Key::C) {
+            self.clipboard = picked;
+        } else if c && pressed(Key::X) {
+            self.clipboard = picked;
+            self.delete_selected();
+        } else if c && pressed(Key::D) {
+            self.paste(picked);
+        } else if pressed(Key::Delete) || pressed(Key::Backspace) {
+            self.delete_selected();
+        } else {
+            let step = if shift { 10 } else { 1 };
+            let mut d = (0, 0);
+            for (k, v) in [(Key::ArrowLeft, (-step, 0)), (Key::ArrowRight, (step, 0)), (Key::ArrowUp, (0, -step)), (Key::ArrowDown, (0, step))] {
+                if pressed(k) {
+                    d = v;
+                }
+            }
+            for i in self.selected.clone() {
+                let w = &mut self.widgets_mut()[i];
+                (w.x, w.y) = (w.x + d.0, w.y + d.1);
+            }
+        }
+    }
+
+    fn delete_selected(&mut self) {
+        let mut sel = std::mem::take(&mut self.selected);
+        sel.sort_unstable_by(|a, b| b.cmp(a));
+        for i in sel {
+            self.widgets_mut().remove(i);
+        }
+    }
+
+    fn thumb(&mut self, ctx: &egui::Context, rel: &str) -> Option<egui::TextureId> {
+        if !self.thumbs.contains_key(rel) {
+            let img = load_image(&self.base(), rel)?;
+            let t = image::imageops::thumbnail(img.as_ref(), 48, 48);
+            let ci = egui::ColorImage::from_rgba_unmultiplied([t.width() as usize, t.height() as usize], t.as_raw());
+            self.thumbs.insert(rel.to_string(), ctx.load_texture(rel, ci, egui::TextureOptions::LINEAR));
+        }
+        self.thumbs.get(rel).map(|t| t.id())
     }
 
     fn toolbar(&mut self, ui: &mut egui::Ui) {
@@ -234,7 +402,8 @@ impl App {
                 self.undo.push(std::mem::take(&mut self.project));
                 self.path = None;
                 self.page = 0;
-                self.selected = None;
+                self.selected.clear();
+                self.assets.clear();
             }
             if ui.button("📂 Open").clicked() {
                 if let Some(p) = rfd::FileDialog::new().add_filter("DWIN Studio", &["json"]).pick_file() {
@@ -257,7 +426,28 @@ impl App {
                 self.do_build();
             }
             ui.separator();
-            ui.toggle_value(&mut self.show_pressed, "👆 Pressed view");
+            // Align / distribute
+            for (icon, how, tip) in [
+                ("⇤", Align::Left, "Align left"), ("↔", Align::HCenter, "Center horizontally"), ("⇥", Align::Right, "Align right"),
+                ("⤒", Align::Top, "Align top"), ("↕", Align::VCenter, "Center vertically"), ("⤓", Align::Bottom, "Align bottom"),
+                ("⋯", Align::DistH, "Distribute horizontally (3+)"), ("⋮", Align::DistV, "Distribute vertically (3+)"),
+            ] {
+                let tip = format!("{tip} - one widget aligns to the screen");
+                if ui.add_enabled(!self.selected.is_empty(), egui::Button::new(icon)).on_hover_text(tip).clicked() {
+                    self.align(how);
+                }
+            }
+            ui.separator();
+            ui.toggle_value(&mut self.show_pressed, "👆 Pressed");
+            ui.label("Grid");
+            ui.add(egui::DragValue::new(&mut self.grid).range(1..=64));
+            let zoom_text = self.zoom.map_or("Fit".into(), |z| format!("{:.0}%", z * 100.0));
+            if ui.button(zoom_text).on_hover_text("Ctrl+wheel zoom, middle-drag or wheel pans. Click = fit").clicked() {
+                (self.zoom, self.pan) = (None, Vec2::ZERO);
+            }
+            if ui.button("100%").clicked() {
+                (self.zoom, self.pan) = (Some(1.0), Vec2::ZERO);
+            }
             ui.separator();
             ui.label(RichText::new(&self.status).weak());
         });
@@ -286,7 +476,7 @@ impl App {
                     let label = format!("▣ {i}  {}", self.project.pages[i].name);
                     if ui.selectable_label(self.page == i, label).clicked() {
                         self.page = i;
-                        self.selected = None;
+                        self.selected.clear();
                     }
                     if self.project.pages.len() > 1 && ui.small_button("✕").on_hover_text("Delete screen").clicked() {
                         remove = Some(i);
@@ -297,49 +487,76 @@ impl App {
                 self.project.pages.remove(i);
                 self.fix_selection();
             }
-            if ui.button("+ Screen").clicked() {
-                let n = self.project.pages.len();
-                let bg = self.project.pages[self.page].bg;
-                self.project.pages.push(Page { name: format!("screen{n}"), bg, widgets: vec![] });
-                self.page = n;
-                self.selected = None;
-            }
+            ui.horizontal(|ui| {
+                if ui.button("+ Screen").clicked() {
+                    let n = self.project.pages.len();
+                    let bg = self.project.pages[self.page].bg;
+                    self.project.pages.push(Page { name: format!("screen{n}"), bg, bg_image: None, widgets: vec![] });
+                    self.page = n;
+                    self.selected.clear();
+                }
+                if ui.button("⧉ Duplicate").clicked() {
+                    let mut p = self.project.pages[self.page].clone();
+                    p.name += "_copy";
+                    for w in &mut p.widgets {
+                        w.name = format!("{}_c", w.name);
+                        if let Some(vp) = w.kind.vp_mut() {
+                            *vp = None;
+                        }
+                    }
+                    self.project.pages.push(p);
+                    self.page = self.project.pages.len() - 1;
+                    self.selected.clear();
+                }
+            });
         });
 
         CollapsingHeader::new("HIERARCHY").default_open(true).show(ui, |ui| {
-            let page = &self.project.pages[self.page];
-            if page.widgets.is_empty() {
+            if self.widgets().is_empty() {
                 ui.label(RichText::new("empty - add widgets below").weak());
             }
-            // Top of list = front-most, like LVGL editors.
+            let shift = ui.input(|i| i.modifiers.shift || i.modifiers.command);
             let mut pick = None;
-            for (i, w) in page.widgets.iter().enumerate().rev() {
+            // Top of list = front-most, like LVGL editors.
+            for (i, w) in self.widgets().iter().enumerate().rev() {
                 let icon = match w.kind {
                     WidgetKind::Button { .. } => "⏺",
                     WidgetKind::Label { .. } => "🗛",
                     WidgetKind::Panel { .. } => "▭",
+                    WidgetKind::Image { .. } => "🖼",
                     WidgetKind::Number { .. } => "#",
                     WidgetKind::Text { .. } => "¶",
+                    WidgetKind::Toggle { .. } => "◑",
+                    WidgetKind::Slider { .. } => "━",
+                    WidgetKind::Icons { .. } => "◈",
                 };
-                let r = ui.selectable_label(self.selected == Some(i), format!("{icon} {}", w.name));
+                let r = ui.selectable_label(self.selected.contains(&i), format!("{icon} {}", w.name));
                 let r = if w.comment.is_empty() { r } else { r.on_hover_text(&w.comment) };
                 if r.clicked() {
                     pick = Some(i);
                 }
             }
-            if pick.is_some() {
-                self.selected = pick;
-            }
-            if let Some(s) = self.selected {
-                ui.horizontal(|ui| {
-                    let n = self.project.pages[self.page].widgets.len();
-                    if ui.small_button("⬆ Front").clicked() && s + 1 < n {
-                        self.page_mut().widgets.swap(s, s + 1);
-                        self.selected = Some(s + 1);
+            if let Some(i) = pick {
+                if shift {
+                    if let Some(pos) = self.selected.iter().position(|&s| s == i) {
+                        self.selected.remove(pos);
+                    } else {
+                        self.selected.push(i);
                     }
-                    if ui.small_button("⬇ Back").clicked() && s > 0 {
-                        self.page_mut().widgets.swap(s, s - 1);
-                        self.selected = Some(s - 1);
+                } else {
+                    self.selected = vec![i];
+                }
+            }
+            if let [s] = self.selected[..] {
+                ui.horizontal(|ui| {
+                    let n = self.widgets().len();
+                    if ui.small_button("⬆ Forward").clicked() && s + 1 < n {
+                        self.widgets_mut().swap(s, s + 1);
+                        self.selected = vec![s + 1];
+                    }
+                    if ui.small_button("⬇ Backward").clicked() && s > 0 {
+                        self.widgets_mut().swap(s, s - 1);
+                        self.selected = vec![s - 1];
                     }
                 });
             }
@@ -348,11 +565,9 @@ impl App {
         CollapsingHeader::new("WIDGETS").default_open(true).show(ui, |ui| {
             egui::Grid::new("palette").num_columns(2).spacing([6.0, 6.0]).show(ui, |ui| {
                 for (i, (name, kind)) in default_widgets().into_iter().enumerate() {
-                    if ui.add_sized([92.0, 28.0], egui::Button::new(name)).clicked() {
+                    if ui.add_sized([100.0, 26.0], egui::Button::new(name)).clicked() {
                         let (cx, cy) = (self.project.width as i32 / 2 - 60, self.project.height as i32 / 2 - 30);
-                        let w = Widget::new(kind, &self.unique_name(name), cx, cy);
-                        self.page_mut().widgets.push(w);
-                        self.selected = Some(self.project.pages[self.page].widgets.len() - 1);
+                        self.add_widget(Widget::new(kind, "", cx, cy));
                     }
                     if i % 2 == 1 {
                         ui.end_row();
@@ -360,18 +575,74 @@ impl App {
                 }
             });
         });
+
+        CollapsingHeader::new("ASSETS").default_open(true).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                if ui.button("⬆ Import images…").clicked() {
+                    self.import_assets();
+                }
+                if ui.small_button("⟳").on_hover_text("Rescan assets folder").clicked() {
+                    self.thumbs.clear();
+                    self.refresh_assets();
+                }
+            });
+            if self.assets.is_empty() {
+                ui.label(RichText::new("PNG/JPG/BMP go to <project>/assets").weak());
+            }
+            let ctx = ui.ctx().clone();
+            for rel in self.assets.clone() {
+                ui.horizontal(|ui| {
+                    if let Some(t) = self.thumb(&ctx, &rel) {
+                        ui.image((t, Vec2::splat(32.0)));
+                    }
+                    let name = rel.trim_start_matches("assets/");
+                    let r = ui.add(egui::Button::new(name).truncate()).on_hover_text("Click: add as Image widget");
+                    if r.clicked() {
+                        self.add_image(&rel);
+                    }
+                    r.context_menu(|ui| {
+                        if ui.button("Use as screen background").clicked() {
+                            self.project.pages[self.page].bg_image = Some(rel.clone());
+                            ui.close();
+                        }
+                    });
+                });
+            }
+        });
         ui.add_space(8.0);
-        ui.small(RichText::new("Drag = move · corner = resize\nArrows nudge (Shift ×10)\nDel · Ctrl+D · Ctrl+Z/Y · Ctrl+S").weak());
+        ui.small(
+            RichText::new("Drag move · corner resize · drag empty = box select\nShift+click multi · Ctrl+A/C/X/V/D · Del\nArrows nudge (Shift ×10) · Ctrl+Z/Y · Ctrl+S\nCtrl+wheel zoom · middle-drag/wheel pan")
+                .weak(),
+        );
+    }
+
+    fn add_image(&mut self, rel: &str) {
+        let Some(img) = load_image(&self.base(), rel) else { return };
+        let (sw, sh) = (self.project.width as f32, self.project.height as f32);
+        let k = (sw / img.width() as f32).min(sh / img.height() as f32).min(1.0);
+        let (w, h) = ((img.width() as f32 * k) as i32, (img.height() as f32 * k) as i32);
+        let stem = Path::new(rel).file_stem().map_or("image".into(), |s| s.to_string_lossy().to_string());
+        let mut wd = Widget::new(WidgetKind::Image { path: rel.into() }, &stem, (sw as i32 - w) / 2, (sh as i32 - h) / 2);
+        (wd.w, wd.h) = (w, h);
+        self.add_widget(wd);
     }
 
     fn inspector(&mut self, ui: &mut egui::Ui, allocs: &[Alloc]) {
         ui.heading("Inspector");
-        let Some(s) = self.selected else {
+        let assets = self.assets.clone();
+        let [s] = self.selected[..] else {
+            if self.selected.len() > 1 {
+                ui.label(format!("{} widgets selected - use the align buttons in the toolbar", self.selected.len()));
+                return;
+            }
             let page = &mut self.project.pages[self.page];
             CollapsingHeader::new("SCREEN").default_open(true).show(ui, |ui| {
                 egui::Grid::new("screen").num_columns(2).show(ui, |ui| {
                     text_row(ui, "Name", &mut page.name);
                     color_row(ui, "Background", &mut page.bg);
+                    ui.label("Picture");
+                    asset_pick(ui, "bgimg", &mut page.bg_image, &assets);
+                    ui.end_row();
                 });
             });
             ui.label(RichText::new("Select a widget to edit it").weak());
@@ -380,9 +651,11 @@ impl App {
         let pages: Vec<String> = self.project.pages.iter().map(|p| p.name.clone()).collect();
         let page = self.page;
         let alloc = allocs.iter().find(|a| a.page == page && a.widget == s).cloned();
+        // Things +/- buttons can point at: anything with a value.
+        let targets: Vec<String> = allocs.iter().filter(|a| a.what != "button" && a.what != "text").map(|a| a.name.clone()).collect();
         let w = &mut self.project.pages[page].widgets[s];
 
-        CollapsingHeader::new(format!("{}", w.kind_name().to_uppercase())).default_open(true).show(ui, |ui| {
+        CollapsingHeader::new(w.kind_name().to_uppercase()).default_open(true).show(ui, |ui| {
             egui::Grid::new("widget").num_columns(2).show(ui, |ui| {
                 text_row(ui, "Name", &mut w.name);
                 ui.label("Comment");
@@ -417,46 +690,139 @@ impl App {
                     color_row(ui, "Color", color);
                     radius_row(ui, radius);
                 }
-                WidgetKind::Button { text, size, fg, bg, pressed_bg, radius, .. } => {
+                WidgetKind::Image { path } => {
+                    ui.label("Picture");
+                    let mut p = Some(path.clone());
+                    asset_pick(ui, "img", &mut p, &assets);
+                    if let Some(p) = p {
+                        *path = p;
+                    }
+                    ui.end_row();
+                }
+                WidgetKind::Button { text, size, fg, bg, pressed_bg, radius, image, .. } => {
                     text_row(ui, "Text", text);
                     size_row(ui, size);
                     color_row(ui, "Text color", fg);
-                    color_row(ui, "Fill", bg);
-                    color_row(ui, "Pressed fill", pressed_bg);
-                    radius_row(ui, radius);
+                    ui.label("Picture");
+                    asset_pick(ui, "btnimg", image, &assets);
+                    ui.end_row();
+                    if image.is_none() {
+                        color_row(ui, "Fill", bg);
+                        color_row(ui, "Pressed fill", pressed_bg);
+                        radius_row(ui, radius);
+                    }
                 }
                 WidgetKind::Number { int_digits, dec_digits, color, .. } => {
-                    ui.label("Integer digits");
-                    ui.add(egui::DragValue::new(int_digits).range(1..=10));
-                    ui.end_row();
-                    ui.label("Decimals");
-                    ui.add(egui::DragValue::new(dec_digits).range(0..=5));
-                    ui.end_row();
+                    drag_row(ui, "Integer digits", int_digits, 1..=10);
+                    drag_row(ui, "Decimals", dec_digits, 0..=5);
                     color_row(ui, "Color", color);
                     ui.label("Font size");
                     ui.label("= height (H)");
                     ui.end_row();
                 }
                 WidgetKind::Text { len, color, .. } => {
-                    ui.label("Max bytes");
-                    ui.add(egui::DragValue::new(len).range(1..=255));
-                    ui.end_row();
+                    drag_row(ui, "Max bytes", len, 1..=255);
                     color_row(ui, "Color", color);
                     ui.label("Font size");
                     ui.label("= height (H)");
                     ui.end_row();
                 }
+                WidgetKind::Toggle { on, off, knob, .. } => {
+                    color_row(ui, "On", on);
+                    color_row(ui, "Off", off);
+                    color_row(ui, "Knob", knob);
+                }
+                WidgetKind::Slider { min, max, track, knob, .. } => {
+                    drag_row(ui, "Min", min, 0..=65535);
+                    drag_row(ui, "Max", max, 0..=65535);
+                    color_row(ui, "Track", track);
+                    color_row(ui, "Knob", knob);
+                    ui.label("Knob size");
+                    ui.label("= height (H)");
+                    ui.end_row();
+                }
+                WidgetKind::Icons { images, .. } => {
+                    ui.label("Value → picture");
+                    ui.end_row();
+                    let mut remove = None;
+                    let mut up = None;
+                    for (i, p) in images.iter().enumerate() {
+                        ui.monospace(format!("{i}"));
+                        ui.horizontal(|ui| {
+                            ui.label(p.trim_start_matches("assets/"));
+                            if i > 0 && ui.small_button("⬆").clicked() {
+                                up = Some(i);
+                            }
+                            if ui.small_button("✕").clicked() {
+                                remove = Some(i);
+                            }
+                        });
+                        ui.end_row();
+                    }
+                    if let Some(i) = remove {
+                        images.remove(i);
+                    }
+                    if let Some(i) = up {
+                        images.swap(i, i - 1);
+                    }
+                    ui.label("");
+                    let mut add = None;
+                    asset_pick(ui, "addicon", &mut add, &assets);
+                    if let Some(a) = add {
+                        images.push(a);
+                    }
+                    ui.end_row();
+                }
             });
         });
 
-        if let WidgetKind::Button { goto, send_key, key, .. } = &mut w.kind {
+        if let WidgetKind::Button { goto, event, .. } = &mut w.kind {
             CollapsingHeader::new("EVENTS").default_open(true).show(ui, |ui| {
-                ui.checkbox(send_key, "Send key to MCU on press");
-                if *send_key {
-                    ui.horizontal(|ui| {
-                        ui.label("Key value");
-                        ui.add(egui::DragValue::new(key).hexadecimal(4, false, true));
+                let label = match event {
+                    Event::None => "Nothing",
+                    Event::Key { .. } => "Send key to MCU",
+                    Event::Adjust { .. } => "Change a value (+/−)",
+                };
+                ui.horizontal(|ui| {
+                    ui.label("On press");
+                    egui::ComboBox::from_id_salt("event").selected_text(label).show_ui(ui, |ui| {
+                        if ui.selectable_label(matches!(event, Event::None), "Nothing").clicked() {
+                            *event = Event::None;
+                        }
+                        if ui.selectable_label(matches!(event, Event::Key { .. }), "Send key to MCU").clicked() {
+                            *event = Event::Key { vp: None, key: 1 };
+                        }
+                        if ui.selectable_label(matches!(event, Event::Adjust { .. }), "Change a value (+/−)").clicked() {
+                            let target = targets.first().cloned().unwrap_or_default();
+                            *event = Event::Adjust { target, step: 1, min: 0, max: 100, wrap: false, repeat: true };
+                        }
                     });
+                });
+                match event {
+                    Event::None => {}
+                    Event::Key { key, .. } => {
+                        ui.horizontal(|ui| {
+                            ui.label("Key value");
+                            ui.add(egui::DragValue::new(key).hexadecimal(4, false, true));
+                        });
+                    }
+                    Event::Adjust { target, step, min, max, wrap, repeat } => {
+                        ui.horizontal(|ui| {
+                            ui.label("Target");
+                            egui::ComboBox::from_id_salt("target").selected_text(target.as_str()).show_ui(ui, |ui| {
+                                for t in &targets {
+                                    ui.selectable_value(target, t.clone(), t);
+                                }
+                            });
+                        });
+                        egui::Grid::new("adj").num_columns(2).show(ui, |ui| {
+                            drag_row(ui, "Step (− = down)", step, -1000..=1000);
+                            drag_row(ui, "Min", min, 0..=65535);
+                            drag_row(ui, "Max", max, 0..=65535);
+                        });
+                        ui.checkbox(wrap, "Wrap around at the ends");
+                        ui.checkbox(repeat, "Repeat while held");
+                    }
                 }
                 let mut jump = goto.is_some();
                 if ui.checkbox(&mut jump, "Go to screen on release").changed() {
@@ -472,96 +838,145 @@ impl App {
             });
         }
 
-        // Read-only bits for the UART example, taken before borrowing the VP mutably.
-        let button_key = match &w.kind {
-            WidgetKind::Button { key, .. } => Some(*key),
-            _ => None,
-        };
-        let is_number = matches!(w.kind, WidgetKind::Number { .. });
-        let vp = match &mut w.kind {
-            WidgetKind::Button { vp, send_key: true, .. } | WidgetKind::Number { vp, .. } | WidgetKind::Text { vp, .. } => Some(vp),
-            _ => None,
-        };
-        if let Some(vp) = vp {
+        // UART example, built before borrowing the VP mutably.
+        let example = alloc.as_ref().map(|a| {
+            let (hi, lo) = (a.vp >> 8, a.vp & 0xFF);
+            match &w.kind {
+                WidgetKind::Button { event: Event::Key { key, .. }, .. } => {
+                    format!("Screen → MCU on press:\n5A A5 06 83 {hi:02X} {lo:02X} 01 {:02X} {:02X}", key >> 8, key & 0xFF)
+                }
+                WidgetKind::Text { .. } => format!("MCU → screen (text \"Hi\"):\n5A A5 05 82 {hi:02X} {lo:02X} 48 69"),
+                WidgetKind::Toggle { .. } | WidgetKind::Slider { .. } => format!(
+                    "Screen → MCU when changed:\n5A A5 06 83 {hi:02X} {lo:02X} 01 00 <v>\nMCU → screen (set 1):\n5A A5 05 82 {hi:02X} {lo:02X} 00 01"
+                ),
+                _ => format!("MCU → screen (value 1):\n5A A5 05 82 {hi:02X} {lo:02X} 00 01"),
+            }
+        });
+        if let Some(vp) = w.kind.vp_mut() {
             CollapsingHeader::new("DWIN ADDRESS").default_open(true).show(ui, |ui| {
                 vp_editor(ui, vp, alloc.as_ref().map(|a| a.vp));
-                if let Some(a) = &alloc {
-                    if let Some(sp) = a.sp {
-                        ui.horizontal(|ui| {
-                            ui.label("SP");
-                            ui.monospace(format!("{sp:#06x}")).on_hover_text("Description pointer: change position/color at runtime");
-                        });
-                    }
-                    let (hi, lo) = (a.vp >> 8, a.vp & 0xFF);
-                    let frame = match button_key {
-                        Some(key) => format!("Screen → MCU on press:\n5A A5 06 83 {hi:02X} {lo:02X} 01 {:02X} {:02X}", key >> 8, key & 0xFF),
-                        None if is_number => format!("MCU → screen (value 123):\n5A A5 05 82 {hi:02X} {lo:02X} 00 7B"),
-                        None => format!("MCU → screen (text \"Hi\"):\n5A A5 05 82 {hi:02X} {lo:02X} 48 69"),
-                    };
+                if let Some(sp) = alloc.as_ref().and_then(|a| a.sp) {
+                    ui.horizontal(|ui| {
+                        ui.label("SP");
+                        ui.monospace(format!("{sp:#06x}")).on_hover_text("Description pointer: change position/color at runtime");
+                    });
+                }
+                if let Some(e) = example {
                     ui.add_space(4.0);
-                    ui.label(RichText::new(frame).monospace().small().weak());
+                    ui.label(RichText::new(e).monospace().small().weak());
                 }
             });
         }
     }
 
     fn canvas(&mut self, ui: &mut egui::Ui) {
+        let area = ui.available_rect_before_wrap();
+        let resp = ui.allocate_rect(area, Sense::click_and_drag());
         let (pw, ph) = (self.project.width as f32, self.project.height as f32);
-        let avail = ui.available_size() - Vec2::splat(24.0);
-        let scale = (avail.x / pw).min(avail.y / ph).max(0.05);
-        let rect = Rect::from_center_size(ui.available_rect_before_wrap().center(), Vec2::new(pw, ph) * scale);
+
+        // Zoom (Ctrl+wheel / pinch) around the pointer; wheel and middle-drag pan.
+        if resp.hovered() {
+            let (zd, scroll) = ui.input(|i| (i.zoom_delta(), i.smooth_scroll_delta));
+            let fit = ((area.width() - 24.0) / pw).min((area.height() - 24.0) / ph).max(0.05);
+            if zd != 1.0 {
+                self.zoom = Some((self.zoom.unwrap_or(fit) * zd).clamp(0.1, 8.0));
+            } else if scroll != Vec2::ZERO {
+                self.pan += scroll;
+            }
+        }
+        if resp.dragged_by(PointerButton::Middle) {
+            self.pan += resp.drag_delta();
+        }
+        let fit = ((area.width() - 24.0) / pw).min((area.height() - 24.0) / ph).max(0.05);
+        let scale = self.zoom.unwrap_or(fit);
+        let rect = Rect::from_center_size(area.center() + self.pan, Vec2::new(pw, ph) * scale);
 
         let key = (self.project.pages[self.page].clone(), self.project.width, self.project.height, self.show_pressed);
         if self.rendered.as_ref() != Some(&key) {
             let mode = if self.show_pressed { Mode::Pressed } else { Mode::Preview };
-            let px = render(&key.0, key.1, key.2, mode);
+            let px = render(&key.0, key.1, key.2, mode, &self.base());
             let img = egui::ColorImage::from_rgba_premultiplied([px.width() as usize, px.height() as usize], px.data());
             self.texture = Some(ui.ctx().load_texture("page", img, egui::TextureOptions::LINEAR));
             self.rendered = Some(key);
         }
-        let resp = ui.allocate_rect(rect, Sense::click_and_drag());
-        let painter = ui.painter_at(rect.expand(HANDLE));
+        let painter = ui.painter_at(area);
+        painter.rect_filled(area, 0.0, Color32::from_gray(24));
         if let Some(t) = &self.texture {
             painter.image(t.id(), rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
         }
         let to_screen = |x: i32, y: i32| rect.min + Vec2::new(x as f32, y as f32) * scale;
         let to_proj = |p: Pos2| ((p - rect.min) / scale).to_pos2();
         let wrect = |w: &Widget| Rect::from_min_max(to_screen(w.x, w.y), to_screen(w.x + w.w, w.y + w.h));
+        let grid = self.grid.max(1);
+        let snap = move |v: f32| (v / grid as f32).round() as i32 * grid;
 
-        for w in &self.project.pages[self.page].widgets {
+        for w in self.widgets() {
             if matches!(w.kind, WidgetKind::Number { .. } | WidgetKind::Text { .. }) {
                 painter.rect_stroke(wrect(w), 0.0, Stroke::new(1.0, Color32::from_gray(110)), StrokeKind::Inside);
             }
         }
 
-        if resp.drag_started() {
+        let shift = ui.input(|i| i.modifiers.shift || i.modifiers.command);
+        if resp.drag_started_by(PointerButton::Primary) {
             if let Some(p) = resp.interact_pointer_pos() {
-                let widgets = &self.project.pages[self.page].widgets;
-                let on_handle = self.selected.filter(|&s| Rect::from_center_size(wrect(&widgets[s]).max, Vec2::splat(HANDLE * 1.6)).contains(p));
-                let hit = on_handle.or_else(|| widgets.iter().rposition(|w| wrect(w).contains(p)));
-                self.selected = hit;
-                if let Some(i) = hit {
-                    let w = &widgets[i];
-                    self.drag = Some(Drag {
-                        mode: if on_handle.is_some() { DragMode::Resize } else { DragMode::Move },
-                        start: to_proj(p),
-                        orig: (w.x, w.y, w.w, w.h),
-                    });
+                let ws = &self.project.pages[self.page].widgets; // field borrow, disjoint from self.selected
+                let handle = match self.selected[..] {
+                    [s] if Rect::from_center_size(wrect(&ws[s]).max, Vec2::splat(HANDLE * 1.6)).contains(p) => Some(s),
+                    _ => None,
+                };
+                let hit = ws.iter().rposition(|w| wrect(w).contains(p));
+                self.drag = if let Some(s) = handle {
+                    Some(Drag::Resize { start: to_proj(p), idx: s, orig: (ws[s].w, ws[s].h) })
+                } else if let Some(i) = hit {
+                    if !self.selected.contains(&i) {
+                        if !shift {
+                            self.selected.clear();
+                        }
+                        self.selected.push(i);
+                    }
+                    let orig = self.selected.iter().map(|&s| (s, ws[s].x, ws[s].y)).collect();
+                    Some(Drag::Move { start: to_proj(p), orig })
+                } else {
+                    if !shift {
+                        self.selected.clear();
+                    }
+                    Some(Drag::Box { start: p })
+                };
+                if !matches!(self.drag, Some(Drag::Box { .. })) {
                     self.undo.push(self.project.clone());
                     self.redo.clear();
                 }
             }
         }
-        if let (Some(d), Some(s), Some(p)) = (&self.drag, self.selected, resp.interact_pointer_pos()) {
-            if resp.dragged() {
-                let delta = to_proj(p) - d.start;
-                let snap = |v: f32| (v as i32 / GRID) * GRID;
-                let (x, y, w0, h0) = d.orig;
-                let w = &mut self.project.pages[self.page].widgets[s];
-                match d.mode {
-                    DragMode::Move => (w.x, w.y) = (x + snap(delta.x), y + snap(delta.y)),
-                    DragMode::Resize => (w.w, w.h) = ((w0 + snap(delta.x)).max(GRID), (h0 + snap(delta.y)).max(GRID)),
+        if let (Some(d), Some(p)) = (&self.drag, resp.interact_pointer_pos()) {
+            match d {
+                Drag::Move { start, orig } if resp.dragged() => {
+                    let delta = to_proj(p) - *start;
+                    let (dx, dy) = (snap(delta.x), snap(delta.y));
+                    for &(i, x, y) in orig.clone().iter() {
+                        let w = &mut self.widgets_mut()[i];
+                        (w.x, w.y) = (x + dx, y + dy);
+                    }
                 }
+                Drag::Resize { start, idx, orig } if resp.dragged() => {
+                    let delta = to_proj(p) - *start;
+                    let (i, (w0, h0)) = (*idx, *orig);
+                    let w = &mut self.widgets_mut()[i];
+                    (w.w, w.h) = ((w0 + snap(delta.x)).max(grid), (h0 + snap(delta.y)).max(grid));
+                }
+                Drag::Box { start } => {
+                    let band = Rect::from_two_pos(*start, p);
+                    painter.rect(band, 0.0, Color32::from_rgba_unmultiplied(250, 180, 40, 25), Stroke::new(1.0, ACCENT), StrokeKind::Inside);
+                    if resp.drag_stopped() {
+                        let hits: Vec<usize> = self.widgets().iter().enumerate().filter(|(_, w)| band.intersects(wrect(w))).map(|(i, _)| i).collect();
+                        for i in hits {
+                            if !self.selected.contains(&i) {
+                                self.selected.push(i);
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
         }
         if resp.drag_stopped() {
@@ -569,16 +984,30 @@ impl App {
         }
         if resp.clicked() {
             let p = resp.interact_pointer_pos().unwrap();
-            self.selected = self.project.pages[self.page].widgets.iter().rposition(|w| wrect(w).contains(p));
+            let hit = self.widgets().iter().rposition(|w| wrect(w).contains(p));
+            match (hit, shift) {
+                (Some(i), true) => {
+                    if let Some(pos) = self.selected.iter().position(|&s| s == i) {
+                        self.selected.remove(pos);
+                    } else {
+                        self.selected.push(i);
+                    }
+                }
+                (Some(i), false) => self.selected = vec![i],
+                (None, _) => self.selected.clear(),
+            }
         }
-        if let Some(s) = self.selected {
-            let w = &self.project.pages[self.page].widgets[s];
+        for &s in &self.selected {
+            let w = &self.widgets()[s];
             let r = wrect(w);
             painter.rect_stroke(r, 0.0, Stroke::new(2.0, ACCENT), StrokeKind::Outside);
-            painter.rect_filled(Rect::from_center_size(r.max, Vec2::splat(HANDLE)), 2.0, ACCENT);
-            painter.text(r.left_top() - Vec2::new(0.0, 2.0), egui::Align2::LEFT_BOTTOM, format!("{}  {}×{}", w.name, w.w, w.h), egui::FontId::proportional(11.0), ACCENT);
+            if self.selected.len() == 1 {
+                painter.rect_filled(Rect::from_center_size(r.max, Vec2::splat(HANDLE)), 2.0, ACCENT);
+                let info = format!("{}  {},{}  {}×{}", w.name, w.x, w.y, w.w, w.h);
+                painter.text(r.left_top() - Vec2::new(0.0, 3.0), egui::Align2::LEFT_BOTTOM, info, egui::FontId::proportional(11.0), ACCENT);
+            }
         }
-        ui.painter().rect_stroke(rect, 0.0, Stroke::new(1.0, Color32::DARK_GRAY), StrokeKind::Outside);
+        painter.rect_stroke(rect, 0.0, Stroke::new(1.0, Color32::DARK_GRAY), StrokeKind::Outside);
     }
 
     fn address_map(&self, ui: &mut egui::Ui, allocs: &[Alloc], warnings: &[String]) {
@@ -600,10 +1029,10 @@ impl App {
                     ui.label(&self.project.pages[a.page].name);
                     ui.label(&a.name);
                     ui.label(a.what);
-                    let fixed = matches!(&w.kind, WidgetKind::Button { vp: Some(_), .. } | WidgetKind::Number { vp: Some(_), .. } | WidgetKind::Text { vp: Some(_), .. });
+                    let fixed = w.kind.vp().flatten().is_some();
                     ui.monospace(format!("{:#06x}{}", a.vp, if fixed { "" } else { " auto" }));
                     ui.monospace(match &w.kind {
-                        WidgetKind::Button { key, .. } => format!("{key:#06x}"),
+                        WidgetKind::Button { event: Event::Key { key, .. }, .. } => format!("{key:#06x}"),
                         _ => "-".into(),
                     });
                     ui.monospace(a.sp.map_or("-".into(), |s| format!("{s:#06x}")));
@@ -622,14 +1051,16 @@ fn text_row(ui: &mut egui::Ui, label: &str, s: &mut String) {
 }
 
 fn size_row(ui: &mut egui::Ui, size: &mut f32) {
-    ui.label("Font size");
-    ui.add(egui::DragValue::new(size).range(6.0..=200.0));
-    ui.end_row();
+    drag_row(ui, "Font size", size, 6.0..=200.0);
 }
 
 fn radius_row(ui: &mut egui::Ui, r: &mut f32) {
-    ui.label("Radius");
-    ui.add(egui::DragValue::new(r).range(0.0..=200.0));
+    drag_row(ui, "Radius", r, 0.0..=200.0);
+}
+
+fn drag_row<N: egui::emath::Numeric>(ui: &mut egui::Ui, label: &str, v: &mut N, range: std::ops::RangeInclusive<N>) {
+    ui.label(label);
+    ui.add(egui::DragValue::new(v).range(range));
     ui.end_row();
 }
 
@@ -637,6 +1068,20 @@ fn color_row(ui: &mut egui::Ui, label: &str, c: &mut [u8; 3]) {
     ui.label(label);
     ui.color_edit_button_srgb(c);
     ui.end_row();
+}
+
+/// Pick an imported asset (or none).
+fn asset_pick(ui: &mut egui::Ui, id: &str, v: &mut Option<String>, assets: &[String]) {
+    let text = v.as_deref().map_or("(none)", |s| s.trim_start_matches("assets/"));
+    egui::ComboBox::from_id_salt(id).selected_text(text).show_ui(ui, |ui| {
+        ui.selectable_value(v, None, "(none)");
+        for a in assets {
+            ui.selectable_value(v, Some(a.clone()), a.trim_start_matches("assets/"));
+        }
+        if assets.is_empty() {
+            ui.label("Import images in ASSETS first");
+        }
+    });
 }
 
 /// Auto shows the address the build will use; switching to manual starts from it.
@@ -675,14 +1120,14 @@ impl eframe::App for App {
             self.toolbar(ui);
             ui.add_space(4.0);
         });
-        egui::Panel::left("left").default_size(230.0).show(ui, |ui| {
+        egui::Panel::left("left").default_size(250.0).show(ui, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| self.left_panel(ui));
         });
-        egui::Panel::right("inspector").default_size(300.0).show(ui, |ui| {
+        egui::Panel::right("inspector").default_size(310.0).show(ui, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| self.inspector(ui, &allocs));
         });
         egui::Panel::bottom("map").resizable(true).default_size(150.0).show(ui, |ui| self.address_map(ui, &allocs, &warnings));
-        egui::CentralPanel::default_margins().show(ui, |ui| self.canvas(ui));
+        egui::CentralPanel::no_frame().show(ui, |ui| self.canvas(ui));
 
         // Property/page edits: one undo step per change (drags push their own at start).
         if self.drag.is_none() && self.project != before && self.undo.last() != Some(&before) {

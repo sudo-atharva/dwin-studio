@@ -16,15 +16,35 @@
           "kind": { "Number": { "vp": null, "int_digits": 3, "dec_digits": 1, "color": [255, 255, 255] } } },
         { "name": "status", "comment": "Status message from MCU", "x": 44, "y": 214, "w": 320, "h": 28,
           "kind": { "Text": { "vp": null, "len": 20, "color": [74, 222, 128] } } },
-        { "name": "start", "x": 24, "y": 392, "w": 170, "h": 64, "comment": "Start welding cycle",
-          "kind": { "Button": { "text": "START", "size": 26.0, "fg": [255, 255, 255], "bg": [22, 163, 74],
-            "pressed_bg": [21, 128, 61], "radius": 12.0, "goto": null, "send_key": true, "vp": null, "key": 1 } } },
-        { "name": "stop", "x": 210, "y": 392, "w": 170, "h": 64, "comment": "Stop welding immediately",
-          "kind": { "Button": { "text": "STOP", "size": 26.0, "fg": [255, 255, 255], "bg": [220, 38, 38],
-            "pressed_bg": [185, 28, 28], "radius": 12.0, "goto": null, "send_key": true, "vp": null, "key": 1 } } },
+
+        { "name": "card2", "x": 408, "y": 84, "w": 368, "h": 180,
+          "kind": { "Panel": { "color": [30, 41, 59], "radius": 14.0 } } },
+        { "name": "gas_label", "x": 428, "y": 104, "w": 120, "h": 28,
+          "kind": { "Label": { "text": "Gas", "size": 22.0, "color": [148, 163, 184] } } },
+        { "name": "gas", "comment": "Shielding gas valve on/off", "x": 672, "y": 100, "w": 84, "h": 40,
+          "kind": { "Toggle": { "vp": null, "on": [34, 197, 94], "off": [71, 85, 105], "knob": [255, 255, 255] } } },
+        { "name": "current_label", "x": 428, "y": 160, "w": 120, "h": 28,
+          "kind": { "Label": { "text": "Current (A)", "size": 22.0, "color": [148, 163, 184] } } },
+        { "name": "current", "comment": "Welding current setpoint 0..200 A", "x": 428, "y": 204, "w": 328, "h": 40,
+          "kind": { "Slider": { "vp": null, "min": 0, "max": 200, "track": [71, 85, 105], "knob": [255, 255, 255] } } },
+        { "name": "current_down", "comment": "Current -5 A", "x": 600, "y": 152, "w": 44, "h": 40,
+          "kind": { "Button": { "text": "-", "size": 28.0, "fg": [255, 255, 255], "bg": [51, 65, 85], "pressed_bg": [30, 41, 59],
+            "radius": 8.0, "goto": null,
+            "event": { "Adjust": { "target": "current", "step": -5, "min": 0, "max": 200, "wrap": false, "repeat": true } } } } },
+        { "name": "current_up", "comment": "Current +5 A", "x": 712, "y": 152, "w": 44, "h": 40,
+          "kind": { "Button": { "text": "+", "size": 28.0, "fg": [255, 255, 255], "bg": [51, 65, 85], "pressed_bg": [30, 41, 59],
+            "radius": 8.0, "goto": null,
+            "event": { "Adjust": { "target": "current", "step": 5, "min": 0, "max": 200, "wrap": false, "repeat": true } } } } },
+
+        { "name": "start", "comment": "Start welding cycle", "x": 24, "y": 392, "w": 170, "h": 64,
+          "kind": { "Button": { "text": "START", "size": 26.0, "fg": [255, 255, 255], "bg": [22, 163, 74], "pressed_bg": [21, 128, 61],
+            "radius": 12.0, "goto": null, "event": { "Key": { "vp": null, "key": 1 } } } } },
+        { "name": "stop", "comment": "Stop welding immediately", "x": 210, "y": 392, "w": 170, "h": 64,
+          "kind": { "Button": { "text": "STOP", "size": 26.0, "fg": [255, 255, 255], "bg": [220, 38, 38], "pressed_bg": [185, 28, 28],
+            "radius": 12.0, "goto": null, "event": { "Key": { "vp": null, "key": 1 } } } } },
         { "name": "to_settings", "x": 606, "y": 392, "w": 170, "h": 64,
-          "kind": { "Button": { "text": "Settings", "size": 24.0, "fg": [255, 255, 255], "bg": [37, 99, 235],
-            "pressed_bg": [29, 78, 216], "radius": 12.0, "goto": 1, "send_key": false, "vp": null, "key": 0 } } }
+          "kind": { "Button": { "text": "Settings", "size": 24.0, "fg": [255, 255, 255], "bg": [37, 99, 235], "pressed_bg": [29, 78, 216],
+            "radius": 12.0, "goto": 1, "event": "None" } } }
       ]
     },
     {
@@ -34,8 +54,8 @@
         { "name": "settings_title", "x": 24, "y": 20, "w": 400, "h": 40,
           "kind": { "Label": { "text": "Settings", "size": 34.0, "color": [255, 255, 255] } } },
         { "name": "back", "x": 24, "y": 392, "w": 170, "h": 64,
-          "kind": { "Button": { "text": "Back", "size": 24.0, "fg": [255, 255, 255], "bg": [71, 85, 105],
-            "pressed_bg": [51, 65, 85], "radius": 12.0, "goto": 0, "send_key": false, "vp": null, "key": 0 } } }
+          "kind": { "Button": { "text": "Back", "size": 24.0, "fg": [255, 255, 255], "bg": [71, 85, 105], "pressed_bg": [51, 65, 85],
+            "radius": 12.0, "goto": 0, "event": "None" } } }
       ]
     }
   ]
