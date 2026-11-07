@@ -1,0 +1,3 @@
+[build]
+# keep build cache out of OneDrive (GBs, constant sync)
+target-dir = "C:/Users/Athar/.cargo-target/dwin-studio"

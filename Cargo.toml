@@ -1,0 +1,6 @@
+[package]
+name = "dwin-studio"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
