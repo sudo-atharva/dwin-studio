@@ -3,9 +3,12 @@
 //! Layouts come from DGUS V7.6 (decompiled `TDocumentSpace`, `InputBase`, `ICL`)
 //! and are checked byte-for-byte against real DGUS output in `tests/roundtrip.rs`.
 
+pub mod build;
 pub mod control;
 pub mod icl;
 pub mod picture;
+pub mod project;
+pub mod render;
 pub mod set;
 pub mod show;
 pub mod touch;
