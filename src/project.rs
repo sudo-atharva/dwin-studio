@@ -32,6 +32,9 @@ pub struct Widget {
     pub y: i32,
     pub w: i32,
     pub h: i32,
+    /// What this widget does; goes into ui_map.txt and ui_gen.h.
+    #[serde(default)]
+    pub comment: String,
     pub kind: WidgetKind,
 }
 
@@ -48,21 +51,17 @@ pub enum WidgetKind {
         bg: Rgb,
         pressed_bg: Rgb,
         radius: f32,
-        action: Action,
+        /// Switch to this page index on release.
+        goto: Option<usize>,
+        /// Write `key` to `vp` and send it to the MCU.
+        send_key: bool,
+        vp: Option<u16>,
+        key: u16,
     },
     /// Number shown by the screen from a VP (int16, fixed-point by `dec_digits`).
     Number { vp: Option<u16>, int_digits: u8, dec_digits: u8, color: Rgb },
     /// Text shown by the screen from a VP (ASCII, `len` bytes).
     Text { vp: Option<u16>, len: u16, color: Rgb },
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum Action {
-    None,
-    /// Switch to page (index into `Project::pages`).
-    GoTo(usize),
-    /// Write `key` to VP and send it to the MCU (DGUS "return key code").
-    ReturnKey { vp: Option<u16>, key: u16 },
 }
 
 impl Widget {
@@ -74,7 +73,7 @@ impl Widget {
             WidgetKind::Number { .. } => (120, 40),
             WidgetKind::Text { .. } => (200, 32),
         };
-        Self { name: name.into(), x, y, w, h, kind }
+        Self { name: name.into(), x, y, w, h, comment: String::new(), kind }
     }
 
     pub fn kind_name(&self) -> &'static str {
@@ -92,7 +91,7 @@ pub fn default_widgets() -> Vec<(&'static str, WidgetKind)> {
     vec![
         ("Button", WidgetKind::Button {
             text: "Button".into(), size: 24.0, fg: [255; 3], bg: [37, 99, 235],
-            pressed_bg: [29, 78, 216], radius: 10.0, action: Action::None,
+            pressed_bg: [29, 78, 216], radius: 10.0, goto: None, send_key: true, vp: None, key: 1,
         }),
         ("Label", WidgetKind::Label { text: "Label".into(), size: 24.0, color: [255; 3] }),
         ("Panel", WidgetKind::Panel { color: [30, 41, 59], radius: 12.0 }),
