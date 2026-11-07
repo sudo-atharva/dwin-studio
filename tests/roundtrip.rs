@@ -36,6 +36,24 @@ fn byte_identical_roundtrip() {
     assert!(failures.is_empty(), "\n{}", failures.join("\n"));
 }
 
+/// Every icon DGUS wrote decodes, and re-packing its JPEG gives the same entry bytes.
+#[test]
+fn sample_icons_decode_and_repack() {
+    for dir in sample_dirs() {
+        let set = DwinSet::load(&dir).unwrap();
+        for (name, icl) in &set.icls {
+            for (i, icon) in icl.icons.iter().enumerate() {
+                let Some(icon) = icon else { continue };
+                let img = icon.decode().unwrap_or_else(|e| panic!("{name}[{i}]: {e}"));
+                assert_eq!((img.width(), img.height()), (icon.width as u32, icon.height as u32));
+                let jpeg = icon.to_jpeg().unwrap();
+                let re = dwin_studio::picture::pack_jpeg(&jpeg, icon.width, icon.height).unwrap();
+                assert!(re == *icon, "{}/{name}[{i}]: repack differs", dir.display());
+            }
+        }
+    }
+}
+
 /// Every record of a known kind must survive decode -> encode through named fields only.
 /// Proves the field tables cover every non-zero byte DGUS writes.
 #[test]

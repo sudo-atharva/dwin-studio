@@ -5,6 +5,7 @@
 
 pub mod control;
 pub mod icl;
+pub mod picture;
 pub mod set;
 pub mod show;
 pub mod touch;
