@@ -35,3 +35,47 @@ fn byte_identical_roundtrip() {
     }
     assert!(failures.is_empty(), "\n{}", failures.join("\n"));
 }
+
+/// Every record of a known kind must survive decode -> encode through named fields only.
+/// Proves the field tables cover every non-zero byte DGUS writes.
+#[test]
+fn typed_controls_roundtrip() {
+    use dwin_studio::control::{show_kind, show_params, show_record};
+    use std::collections::BTreeMap;
+
+    let mut seen: BTreeMap<String, usize> = BTreeMap::new();
+    let mut failures = Vec::new();
+    for dir in sample_dirs() {
+        let set = DwinSet::load(&dir).unwrap();
+        for r in set.touch.iter().flat_map(|t| &t.records) {
+            let name = match r.kind() {
+                Some(k) => {
+                    let mut copy = r.clone();
+                    copy.set_params(k, &r.params().unwrap());
+                    if copy != *r {
+                        failures.push(format!("{}: touch {} {:02x?}", dir.display(), k.name, r.ext));
+                    }
+                    k.name.to_string()
+                }
+                None if r.code >> 8 >= 0xFD => format!("UNTYPED touch {:04x}", r.code),
+                None => "basic_touch".into(),
+            };
+            *seen.entry(name).or_default() += 1;
+        }
+        for r in set.show.iter().flat_map(|s| s.pages.values().flatten()) {
+            let name = match show_kind(r) {
+                Some(k) => {
+                    if show_record(k, &show_params(r).unwrap()) != *r {
+                        failures.push(format!("{}: show {} {:02x?}", dir.display(), k.name, r));
+                    }
+                    k.name.to_string()
+                }
+                None => format!("UNTYPED show {:02x}", r[1]),
+            };
+            *seen.entry(name).or_default() += 1;
+        }
+    }
+    eprintln!("controls seen: {seen:#?}");
+    assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+    assert!(!seen.keys().any(|k| k.starts_with("UNTYPED")), "untyped kinds: {seen:?}");
+}
