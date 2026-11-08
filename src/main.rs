@@ -27,7 +27,7 @@ fn write_output(o: &Output, dir: &Path) -> Result<(), Box<dyn std::error::Error>
     Ok(())
 }
 
-/// `dwin-studio build <project.dwin.json> <out dir>`: headless build, prints warnings.
+/// `dwin-studio build <project.dwin> <out dir>`: headless build, prints warnings.
 fn cli_build(project: &str, out: &str) -> Result<(), Box<dyn std::error::Error>> {
     let p: Project = serde_json::from_str(&std::fs::read_to_string(project)?)?;
     let base = Path::new(project).parent().unwrap_or(Path::new("."));
@@ -61,13 +61,13 @@ fn main() -> eframe::Result {
                 std::process::exit(1);
             }
         } else {
-            eprintln!("usage: dwin-studio build <project.dwin.json> <out dir>");
+            eprintln!("usage: dwin-studio build <project.dwin> <out dir>");
         }
         return Ok(());
     }
     if args.get(1).map(String::as_str) == Some("import") {
         let [_, _, dir, out] = &args[..] else {
-            eprintln!("usage: dwin-studio import <DWIN_SET dir> <new.dwin.json>");
+            eprintln!("usage: dwin-studio import <DWIN_SET dir> <new.dwin>");
             return Ok(());
         };
         let out = Path::new(out);
@@ -285,7 +285,7 @@ impl App {
 
     fn save(&mut self, ask: bool) -> bool {
         if ask || self.path.is_none() {
-            let dlg = rfd::FileDialog::new().add_filter("DWIN Studio", &["json"]).set_file_name("project.dwin.json");
+            let dlg = rfd::FileDialog::new().add_filter("DWIN Studio project", &["dwin", "json"]).set_file_name("project.dwin");
             let Some(p) = dlg.save_file() else { return false };
             self.path = Some(p);
             self.refresh_assets();
@@ -307,8 +307,8 @@ impl App {
     /// DWIN_SET folder -> new project saved where the user says (pictures go to its assets/).
     fn import_dgus(&mut self) {
         let Some(dir) = rfd::FileDialog::new().set_title("DGUS DWIN_SET folder to import").pick_folder() else { return };
-        let dlg = rfd::FileDialog::new().set_title("Save the imported project as").add_filter("DWIN Studio", &["json"]);
-        let Some(out) = dlg.set_file_name("imported.dwin.json").save_file() else { return };
+        let dlg = rfd::FileDialog::new().set_title("Save the imported project as").add_filter("DWIN Studio project", &["dwin", "json"]);
+        let Some(out) = dlg.set_file_name("imported.dwin").save_file() else { return };
         let folder = out.parent().unwrap_or(Path::new(".")).to_path_buf();
         match dwin_studio::import::import(&dir, &folder) {
             Ok((p, report)) => {
@@ -549,7 +549,7 @@ impl App {
                 self.assets.clear();
             }
             if ui.button("📂 Open").clicked() {
-                if let Some(p) = rfd::FileDialog::new().add_filter("DWIN Studio", &["json"]).pick_file() {
+                if let Some(p) = rfd::FileDialog::new().add_filter("DWIN Studio project", &["dwin", "json"]).pick_file() {
                     self.load(p);
                 }
             }
