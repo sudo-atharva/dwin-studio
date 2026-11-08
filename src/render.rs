@@ -349,6 +349,37 @@ pub fn icon(base_px: &Pixmap, w: &Widget, state: usize, size: (i32, i32), base: 
     px
 }
 
+/// DWIN ASCII font library (`0_DWIN_ASC.HZK`) drawn with the editor font, so text on the
+/// screen looks like the preview. Layout (checked against DWIN's file): sizes 4..=64, each
+/// 128 chars of `size` x `2*size` dots, rows of ceil(size/8) bytes, MSB = leftmost.
+pub fn ascii_hzk() -> Vec<u8> {
+    let f = font();
+    let mut out = Vec::with_capacity(3_082_752);
+    for size in 4..=64usize {
+        let (w, h) = (size, 2 * size);
+        let bpr = w.div_ceil(8);
+        let sf = f.as_scaled(PxScale::from(h as f32));
+        for c in 0..128u8 {
+            let mut cell = vec![0u8; bpr * h];
+            if c >= 0x20 {
+                let id = sf.glyph_id(c as char);
+                let x = ((w as f32 - sf.h_advance(id)) / 2.0).max(0.0);
+                if let Some(o) = f.outline_glyph(id.with_scale_and_position(h as f32, point(x, sf.ascent()))) {
+                    let b = o.px_bounds();
+                    o.draw(|gx, gy, cov| {
+                        let (px, py) = (b.min.x as i32 + gx as i32, b.min.y as i32 + gy as i32);
+                        if cov >= 0.35 && px >= 0 && py >= 0 && (px as usize) < w && (py as usize) < h {
+                            cell[py as usize * bpr + px as usize / 8] |= 0x80 >> (px % 8);
+                        }
+                    });
+                }
+            }
+            out.extend(cell);
+        }
+    }
+    out
+}
+
 /// Pixmap (premultiplied, but always opaque here) -> RGBA image.
 pub fn to_image(px: &Pixmap) -> image::DynamicImage {
     let rgba = image::RgbaImage::from_raw(px.width(), px.height(), px.data().to_vec()).unwrap();

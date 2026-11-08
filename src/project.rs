@@ -119,7 +119,17 @@ pub enum WidgetKind {
     /// Live curve; MCU pushes samples to `channel` (0..7) through VP 0x0310.
     Chart { channel: u8, min: i16, max: i16, step: u8, color: Rgb, bg: Rgb },
     /// Dial with a needle rotated by VP between min and max over `sweep` degrees.
-    Gauge { vp: Option<u16>, min: u16, max: u16, sweep: u16, needle: Rgb, dial: Rgb },
+    /// `knob`: dragging around the dial sets the value (DGUS rotate adjust).
+    Gauge {
+        vp: Option<u16>,
+        min: u16,
+        max: u16,
+        sweep: u16,
+        needle: Rgb,
+        dial: Rgb,
+        #[serde(default)]
+        knob: bool,
+    },
     /// Area the MCU draws into with DGUS basic-graphics commands (lines, boxes, dots)
     /// written to a `words`-long buffer at VP.
     Drawing { vp: Option<u16>, words: u16, bg: Rgb },
@@ -246,7 +256,8 @@ pub fn default_widgets() -> Vec<(&'static str, WidgetKind)> {
         ("Progress", WidgetKind::Progress {
             vp: None, min: 0, max: 100, fg: [34, 197, 94], bg: [51, 65, 85], border: [148, 163, 184], vertical: false,
         }),
-        ("Gauge", WidgetKind::Gauge { vp: None, min: 0, max: 100, sweep: 270, needle: [239, 68, 68], dial: [148, 163, 184] }),
+        ("Gauge", WidgetKind::Gauge { vp: None, min: 0, max: 100, sweep: 270, needle: [239, 68, 68], dial: [148, 163, 184], knob: false }),
+        ("Knob", WidgetKind::Gauge { vp: None, min: 0, max: 100, sweep: 270, needle: [56, 139, 253], dial: [148, 163, 184], knob: true }),
         ("Chart", WidgetKind::Chart { channel: 0, min: 0, max: 100, step: 2, color: [56, 189, 248], bg: [2, 6, 23] }),
         ("Clock", WidgetKind::Clock { format: "Y-M-D H:Q:S".into(), color: [255; 3] }),
         ("QR Code", WidgetKind::Qr { vp: None, len: 64, dot: 4 }),

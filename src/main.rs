@@ -584,7 +584,7 @@ impl App {
                     self.prompt = Some((pr, String::new()));
                 }
             } else if resp.dragged() {
-                sim.drag(&self.project, q.x as i32);
+                sim.drag(&self.project, q.x as i32, q.y as i32);
             }
         }
         if up {
@@ -1104,12 +1104,15 @@ impl App {
                     color_row(ui, "Line", color);
                     color_row(ui, "Background", bg);
                 }
-                WidgetKind::Gauge { min, max, sweep, needle, dial, .. } => {
+                WidgetKind::Gauge { min, max, sweep, needle, dial, knob, .. } => {
                     drag_row(ui, "Min", min, 0..=65535);
                     drag_row(ui, "Max", max, 0..=65535);
                     drag_row(ui, "Sweep (°)", sweep, 30..=355);
                     color_row(ui, "Needle", needle);
                     color_row(ui, "Dial", dial);
+                    ui.label("Touch");
+                    ui.checkbox(knob, "knob: drag to set");
+                    ui.end_row();
                 }
                 WidgetKind::Drawing { words, bg, .. } => {
                     drag_row(ui, "Command buffer (words)", words, 8..=4096);
@@ -1484,7 +1487,7 @@ fn kind_icon(k: &WidgetKind) -> &'static str {
 /// Palette groups, EEZ-style. Names match `default_widgets()`; anything new lands in "More".
 const GROUPS: &[(&str, &[&str])] = &[
     ("Basic", &["Label", "Panel", "Button", "+ / − Button"]),
-    ("Input", &["Number Input", "Text Input", "Toggle", "Slider", "Dropdown"]),
+    ("Input", &["Number Input", "Text Input", "Toggle", "Slider", "Knob", "Dropdown"]),
     ("Display", &["Number", "Big Number", "Text", "Scrolling Text", "Lamp", "Icons", "Progress", "Gauge", "Clock", "QR Code"]),
     ("Graphics", &["Chart", "Drawing", "Animation"]),
 ];

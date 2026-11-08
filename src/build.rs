@@ -548,7 +548,7 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                     ];
                     shows.push(show_record(kind(SHOW_KINDS, "curve"), &params));
                 }
-                WidgetKind::Gauge { min, max, sweep, needle, .. } => {
+                WidgetKind::Gauge { min, max, sweep, needle, knob, .. } => {
                     let (cx, cy, r, start) = gauge_geom(w, *sweep);
                     let (px, icx, icy) = needle_icon(r, *needle);
                     let id = icons.add(&px)?;
@@ -561,6 +561,15 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                         ("lib", n(ICON_LIB as u32)), ("mode", n(1)), // 1 = black is transparent, as in DGUS demo 4
                     ];
                     shows.push(show_record(kind(SHOW_KINDS, "icon_rotate"), &params));
+                    if *knob {
+                        // Centre given relative to the touch area's centre (0,0), as in DGUS demo 5.
+                        let params: Params = vec![
+                            ("vp", vp()), ("r0", n((r * 0.3) as u32)), ("r1", n(r as u32)), ("a0", half(start)),
+                            ("v_begin", n(*min as u32)), ("a1", half(start + *sweep as f32)), ("v_end", n(*max as u32)),
+                        ];
+                        rec.set_params(kind(TOUCH_KINDS, "rotate_adjust"), &params);
+                        touch.push(rec);
+                    }
                 }
                 WidgetKind::Label { .. } | WidgetKind::Panel { .. } | WidgetKind::Image { .. } => {}
             }
@@ -616,6 +625,8 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
         set.icls.insert(format!("{ICON_LIB}.icl"), Icl { icons: icons.0, align: 4, pad_to: 0 });
     }
     set.raw.insert("22_Config.bin".into(), config);
+    // Font 0 drawn with the editor font: numbers/text look like the preview.
+    set.raw.insert("0_DWIN_ASC.HZK".into(), crate::render::ascii_hzk());
 
     let header = header(p, &allocs);
     let mut map = ui_map(p, &allocs);
@@ -716,7 +727,11 @@ fn describe(p: &Project, w: &Widget, a: Option<&Alloc>) -> Option<String> {
             "DRAWING VP {:#06x} ({words} words): MCU writes basic-graphics commands here (T5L manual: 0x0002 lines, 0x0003 boxes, 0x0004 filled boxes...), 0x0000 ends",
             vp()
         ),
-        WidgetKind::Gauge { min, max, .. } => format!("GAUGE   VP {:#06x} = {min}..{max} turns the needle", vp()),
+        WidgetKind::Gauge { min, max, knob, .. } => format!(
+            "GAUGE   VP {:#06x} = {min}..{max} turns the needle{}",
+            vp(),
+            if *knob { "; dragging around it sets the value and sends it" } else { "" }
+        ),
         WidgetKind::Animation { autoplay, .. } => format!(
             "ANIMATION VP {:#06x}: 1 = play, 0 = stop (boots {})",
             vp(),
@@ -874,6 +889,12 @@ mod tests {
         assert_eq!(shows, ["bit_icon", "bit_icon", "scroll_text", "art_number"]);
         // toggle(2) + slider(1) on home, then 2 + 2 bit icons, then 12 digits.
         assert_eq!(out.set.icls["48.icl"].icons.len(), 3 + 4 + 12);
+        let hzk = &out.set.raw["0_DWIN_ASC.HZK"];
+        assert_eq!(hzk.len(), 3_082_752, "same size as DWIN's own font file");
+        // Size 16 'A': 32 rows x 2 bytes, some ink, nothing for a space.
+        let at = |size: usize, c: usize| (4..size).map(|i| 128 * 2 * i * i.div_ceil(8)).sum::<usize>() + c * 2 * size * size.div_ceil(8);
+        assert!(hzk[at(16, 65)..at(16, 66)].iter().any(|&b| b != 0));
+        assert!(hzk[at(16, 32)..at(16, 33)].iter().all(|&b| b == 0));
     }
 
     #[test]

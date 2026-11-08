@@ -106,6 +106,7 @@ impl Sim {
         matches!(
             w.kind,
             WidgetKind::Button { .. } | WidgetKind::Toggle { .. } | WidgetKind::Slider { .. } | WidgetKind::Dropdown { .. }
+                | WidgetKind::Gauge { knob: true, .. }
                 | WidgetKind::Number { input: Some(_), .. } | WidgetKind::Text { input: true, .. }
         )
     }
@@ -154,7 +155,7 @@ impl Sim {
                 self.set(vp?, v);
                 self.send(vp?);
             }
-            WidgetKind::Slider { .. } => self.drag(p, x),
+            WidgetKind::Slider { .. } | WidgetKind::Gauge { .. } => self.drag(p, x, y),
             WidgetKind::Number { dec_digits, input: Some((min, max)), .. } => {
                 return Some(Prompt::Number { vp: vp?, dec: *dec_digits, min: *min, max: *max })
             }
@@ -165,17 +166,29 @@ impl Sim {
         None
     }
 
-    /// Finger moved: only sliders follow it.
-    pub fn drag(&mut self, p: &Project, x: i32) {
+    /// Finger moved: sliders follow x, knobs follow the angle around their centre.
+    pub fn drag(&mut self, p: &Project, x: i32, y: i32) {
         let Some(wi) = self.held else { return };
         let Some(w) = p.pages[self.page].widgets.get(wi) else { return };
-        if let WidgetKind::Slider { min, max, .. } = w.kind {
-            let (x0, x1) = (w.x + w.h / 2, w.x + w.w - w.h / 2);
-            let f = ((x - x0) as f32 / (x1 - x0).max(1) as f32).clamp(0.0, 1.0);
-            let v = min as f32 + f * (max as f32 - min as f32);
-            if let Some(vp) = self.vp(self.page, wi) {
-                self.set(vp, v.round() as u16);
+        let (f, min, max) = match w.kind {
+            WidgetKind::Slider { min, max, .. } => {
+                let (x0, x1) = (w.x + w.h / 2, w.x + w.w - w.h / 2);
+                ((x - x0) as f32 / (x1 - x0).max(1) as f32, min, max)
             }
+            WidgetKind::Gauge { min, max, sweep, .. } => {
+                let (cx, cy, _, start) = gauge_geom(w, sweep);
+                // Clockwise from 12 o'clock, then measured from the dial start.
+                let a = (x as f32 - cx).atan2(cy - y as f32).to_degrees().rem_euclid(360.0);
+                let rel = (a - start).rem_euclid(360.0);
+                // Past the end: snap to whichever end is nearer.
+                let rel = if rel > sweep as f32 { if rel - sweep as f32 > (360.0 - rel) { 0.0 } else { sweep as f32 } } else { rel };
+                (rel / sweep.max(1) as f32, min, max)
+            }
+            _ => return,
+        };
+        let v = min as f32 + f.clamp(0.0, 1.0) * (max as f32 - min as f32);
+        if let Some(vp) = self.vp(self.page, wi) {
+            self.set(vp, v.round() as u16);
         }
     }
 
@@ -190,7 +203,7 @@ impl Sim {
             return;
         }
         if let Some(wi) = self.held.take() {
-            if matches!(p.pages[self.page].widgets.get(wi).map(|w| &w.kind), Some(WidgetKind::Slider { .. })) {
+            if matches!(p.pages[self.page].widgets.get(wi).map(|w| &w.kind), Some(WidgetKind::Slider { .. } | WidgetKind::Gauge { .. })) {
                 if let Some(vp) = self.vp(self.page, wi) {
                     self.send(vp);
                 }
@@ -447,5 +460,14 @@ mod tests {
         assert_eq!(s.page, 0);
         assert_eq!(s.out[0], [0x5A, 0xA5, 0x03, 0x82, 0x4F, 0x4B]);
         assert_eq!(s.out[1], [0x5A, 0xA5, 0x06, 0x83, 0x10, 0x20, 0x01, 0x00, 42]);
+
+        // Knob: 270 degree dial, finger at 12 o'clock = middle of the range, sent on release.
+        let mut p2 = p.clone();
+        p2.pages[0].widgets = vec![Widget::new(kind("Knob"), "k", 0, 0)];
+        let mut s = Sim::new(&p2);
+        s.press(&p2, 100, 10);
+        s.release(&p2, 100);
+        assert_eq!(s.get(0x1000), 50);
+        assert_eq!(s.out.len(), 1);
     }
 }
