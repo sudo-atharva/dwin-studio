@@ -183,7 +183,7 @@ Known limits:
 - Video, camera and page-transition features from DGUS are not supported.
 
 Tests: `cargo test`. The byte-for-byte DGUS round-trip tests run only when DWIN's sample
-projects (`DWIN_Training_Demos-master`, `DWIN2_Display-main`) sit next to this folder.
+projects (`DWIN_Training_Demos-master`, `DWIN2_Display-main`) are in a `samples` folder next to this one.
 
 ## Branches
 
