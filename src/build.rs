@@ -21,10 +21,10 @@ pub const VP_START: u16 = 0x1000;
 pub const SP_START: u16 = 0x9000;
 /// Icon library id for generated icons. 48 x 256 KB = 12 MB flash offset;
 /// leaves 32.icl (page images, from 8 MB) up to 4 MB.
-pub const ICON_LIB: u8 = 48;
+/// Each library number N sits at flash offset N x 256 KB.
+const SECTOR: usize = 256 * 1024;
 /// Bit icons need a private work VP each; they live here, below the SP area.
 const AUX_START: u16 = 0x8000;
-const PAGE_LIB_MAX: usize = (ICON_LIB as usize - 32) * 256 * 1024;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Alloc {
@@ -72,6 +72,7 @@ pub fn allocate(p: &Project) -> (Vec<Alloc>, Vec<String>) {
                 WidgetKind::Slider { .. } => (1, false, "slider"),
                 WidgetKind::Icons { .. } => (1, false, "icons"),
                 WidgetKind::Dropdown { .. } => (1, false, "dropdown"),
+                WidgetKind::List { .. } => (1, false, "list"),
                 WidgetKind::Qr { len, .. } => (len.div_ceil(2) + 1, false, "qr"),
                 WidgetKind::Progress { .. } => (1, false, "progress"),
                 WidgetKind::Gauge { .. } => (1, false, "gauge"),
@@ -277,6 +278,8 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
     let by_name = |name: &str| allocs.iter().find(|a| a.name == name);
     let npages = p.pages.len();
     let (sw, sh) = (p.width as i32, p.height as i32);
+    let ilib = p.icon_lib as u32;
+    crate::render::set_font(p.font.as_ref().map(|f| base.join(f)).as_deref());
 
     // Generated screens go after the user's.
     let mut extras: Vec<Extra> = vec![];
@@ -369,7 +372,7 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                         }
                         let params: Params = vec![
                             ("sp", n(a.unwrap().sp.unwrap() as u32)), ("vp", vp()), ("x", n(x0)), ("y", n(y0)),
-                            ("icon0", n(first)), ("lib", n(ICON_LIB as u32)),
+                            ("icon0", n(first)), ("lib", n(ilib)),
                             ("int_digits", n(*int_digits as u32)), ("dec_digits", n(*dec_digits as u32)),
                         ];
                         shows.push(show_record(kind(SHOW_KINDS, "art_number"), &params));
@@ -422,8 +425,14 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                         touch.push(rec);
                     }
                 }
-                WidgetKind::Toggle { .. } | WidgetKind::Lamp { .. } | WidgetKind::Icons { .. } | WidgetKind::Dropdown { .. } | WidgetKind::Animation { .. } => {
+                WidgetKind::Toggle { .. }
+                | WidgetKind::Lamp { .. }
+                | WidgetKind::Icons { .. }
+                | WidgetKind::Dropdown { .. }
+                | WidgetKind::Animation { .. }
+                | WidgetKind::List { .. } => {
                     let states = match &w.kind {
+                        WidgetKind::List { items, .. } => items.len() + 1,
                         WidgetKind::Icons { images, .. } | WidgetKind::Animation { images, .. } => images.len().max(1),
                         WidgetKind::Dropdown { options, .. } => options.len().max(1),
                         _ => 2,
@@ -438,7 +447,7 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                         let params: Params = vec![
                             ("sp", n(0xFFFF)), ("vp", vp()), ("x", n(x0)), ("y", n(y0)), ("v_stop", n(0)), ("v_start", n(1)),
                             ("icon_stop", n(first)), ("icon_start", n(first)), ("icon_end", n(last)),
-                            ("lib", n(ICON_LIB as u32)), ("period", n((*period_ms / 8).clamp(1, 255) as u32)),
+                            ("lib", n(ilib)), ("period", n((*period_ms / 8).clamp(1, 255) as u32)),
                         ];
                         shows.push(show_record(kind(SHOW_KINDS, "animation"), &params));
                         if *autoplay {
@@ -455,7 +464,7 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                         // One bit of the VP picks icon `first` (0) or `last` (1).
                         let params: Params = vec![
                             ("sp", n(0xFFFF)), ("vp", vp()), ("vp_aux", n(aux as u32)), ("bits", n(1 << (b % 16))),
-                            ("lib", n(ICON_LIB as u32)), ("icon0_start", n(first)), ("icon0_end", n(first)),
+                            ("lib", n(ilib)), ("icon0_start", n(first)), ("icon0_end", n(first)),
                             ("icon1_start", n(last)), ("icon1_end", n(last)), ("x", n(x0)), ("y", n(y0)),
                         ];
                         aux += 2;
@@ -470,7 +479,7 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                     let params: Params = vec![
                         ("sp", n(0xFFFF)), ("vp", vp()), ("x", n(x0)), ("y", n(y0)),
                         ("v_min", n(0)), ("v_max", n(states - 1)), ("icon_min", n(first)),
-                        ("icon_max", n(last)), ("lib", n(ICON_LIB as u32)),
+                        ("icon_max", n(last)), ("lib", n(ilib)),
                     ];
                     shows.push(show_record(kind(SHOW_KINDS, "var_icon"), &params));
                     match &w.kind {
@@ -482,6 +491,18 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                             ];
                             rec.set_params(kind(TOUCH_KINDS, "increment"), &params);
                             touch.push(rec);
+                        }
+                        WidgetKind::List { items, .. } => {
+                            // One key per row: row i sends i + 1.
+                            let rh = w.h / items.len().max(1) as i32;
+                            for i in 0..items.len() as i32 {
+                                let mut row = w.clone();
+                                (row.y, row.h) = (w.y + i * rh, rh);
+                                let (x0, y0, x1, y1) = corners(&row, p.width, p.height);
+                                let mut r = TouchRecord { page_raw: pi as u16, x0, y0, x1, y1, next_page: NONE, pressed_page: NONE, code: 0, ext: vec![] };
+                                r.set_params(kind(TOUCH_KINDS, "return_key"), &vec![("vp", vp()), ("key", n(i as u32 + 1))]);
+                                touch.push(r);
+                            }
                         }
                         WidgetKind::Dropdown { .. } => {
                             let (mp, (mx, my, mw, mh)) = menus[&(pi, wi)];
@@ -506,7 +527,7 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                     let params: Params = vec![
                         ("sp", n(0xFFFF)), ("vp", vp()), ("v_begin", n(*min as u32)), ("v_end", n(*max as u32)),
                         ("x_begin", n(kx0)), ("x_end", n(kx1)), ("icon", n(knob)), ("y", n(y0)),
-                        ("lib", n(ICON_LIB as u32)),
+                        ("lib", n(ilib)),
                     ];
                     shows.push(show_record(kind(SHOW_KINDS, "slider_show"), &params));
                     // Touch: value follows the knob centre between the track ends.
@@ -566,7 +587,7 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                         ("sp", n(0xFFFF)), ("vp", vp()), ("icon", n(id)), ("icon_cx", n(icx)), ("icon_cy", n(icy)),
                         ("cx", n(cx as u32)), ("cy", n(cy as u32)), ("v_begin", n(*min as u32)), ("v_end", n(*max as u32)),
                         ("angle_begin", half(start)), ("angle_end", half(start + *sweep as f32)),
-                        ("lib", n(ICON_LIB as u32)), ("mode", n(1)), // 1 = black is transparent, as in DGUS demo 4
+                        ("lib", n(ilib)), ("mode", n(1)), // 1 = black is transparent, as in DGUS demo 4
                     ];
                     shows.push(show_record(kind(SHOW_KINDS, "icon_rotate"), &params));
                     if *knob {
@@ -624,17 +645,17 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
             set.raw.insert(format!("{id:02}_{}.jpg", sanitize(name).to_lowercase()), img.to_jpeg()?);
         }
     }
-    let page_icl = Icl { icons: pages, align: 4, pad_to: 0 };
-    if page_icl.to_bytes().len() > PAGE_LIB_MAX {
-        warnings.push(format!("page images exceed {} MB and would overlap {ICON_LIB}.icl", PAGE_LIB_MAX >> 20));
+    if p.page_lib == p.icon_lib {
+        warnings.push(format!("page and icon library are both {}.icl", p.page_lib));
     }
-    set.icls.insert("32.icl".into(), page_icl);
+    set.icls.insert(format!("{}.icl", p.page_lib), Icl { icons: pages, align: 4, pad_to: 0 });
     if !icons.0.is_empty() {
-        set.icls.insert(format!("{ICON_LIB}.icl"), Icl { icons: icons.0, align: 4, pad_to: 0 });
+        set.icls.insert(format!("{ilib}.icl"), Icl { icons: icons.0, align: 4, pad_to: 0 });
     }
     set.raw.insert("22_Config.bin".into(), config);
     // Font 0 drawn with the editor font: numbers/text look like the preview.
     set.raw.insert("0_DWIN_ASC.HZK".into(), crate::render::ascii_hzk());
+    warnings.extend(flash_overlaps(&set));
 
     let header = header(p, &allocs);
     let mut map = ui_map(p, &allocs);
@@ -645,6 +666,25 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
         }
     }
     Ok(Output { set, header, map, allocs, warnings })
+}
+
+/// Files land in flash at (leading number) x 256 KB; report any two that overlap.
+fn flash_overlaps(set: &DwinSet) -> Vec<String> {
+    let mut spans: Vec<(String, usize, usize)> = set
+        .files()
+        .into_iter()
+        .filter_map(|(name, bytes)| {
+            let id: usize = name.chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse().ok()?;
+            // Plain page JPEGs (NN_name.jpg) are copies for people, not loaded by the screen.
+            (!name.ends_with(".jpg")).then(|| (name, id * SECTOR, id * SECTOR + bytes.len()))
+        })
+        .collect();
+    spans.sort_by_key(|s| s.1);
+    spans
+        .windows(2)
+        .filter(|w| w[0].2 > w[1].1)
+        .map(|w| format!("{} ({} KB) runs into {} in the screen's flash: pick a higher number for {}", w[0].0, w[0].2.div_ceil(1024) - w[0].1 / 1024, w[1].0, w[1].0))
+        .collect()
 }
 
 pub fn sanitize(s: &str) -> String {
@@ -719,6 +759,10 @@ fn describe(p: &Project, w: &Widget, a: Option<&Alloc>) -> Option<String> {
         WidgetKind::Lamp { .. } => format!("LAMP    VP {:#06x}: 0 off / 1 on", vp()),
         WidgetKind::Slider { min, max, .. } => format!("SLIDER  VP {:#06x} = {min}..{max}; drag sends it, MCU write moves knob", vp()),
         WidgetKind::Icons { images, .. } => format!("ICONS   VP {:#06x} = 0..{} picks the picture", vp(), images.len().max(1) - 1),
+        WidgetKind::List { items, .. } => {
+            let list: Vec<_> = items.iter().enumerate().map(|(i, o)| format!("{}={o}", i + 1)).collect();
+            format!("LIST    VP {:#06x}: 0 = none, {}; tap sends it (pair with an OK button)", vp(), list.join(", "))
+        }
         WidgetKind::Dropdown { options, .. } => {
             let list: Vec<_> = options.iter().enumerate().map(|(i, o)| format!("{i}={o}")).collect();
             format!("DROPDOWN VP {:#06x}: {}; picking sends it", vp(), list.join(", "))
@@ -795,6 +839,9 @@ mod tests {
         Project {
             width: 1024,
             height: 600,
+            page_lib: 32,
+            icon_lib: 48,
+            font: None,
             pages: vec![
                 Page { name: "home".into(), bg: [10, 20, 30], bg_image: None, swipe: (None, None), widgets: vec![
                     Widget::new(palette("Button"), "start", 20, 20),
@@ -903,6 +950,23 @@ mod tests {
         let at = |size: usize, c: usize| (4..size).map(|i| 128 * 2 * i * i.div_ceil(8)).sum::<usize>() + c * 2 * size * size.div_ceil(8);
         assert!(hzk[at(16, 65)..at(16, 66)].iter().any(|&b| b != 0));
         assert!(hzk[at(16, 32)..at(16, 33)].iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn list_and_libraries() {
+        let mut p = sample();
+        p.pages[1].widgets.push(Widget::new(palette("List"), "programs", 10, 10));
+        (p.page_lib, p.icon_lib) = (23, 42);
+        let out = build(&p, Path::new(".")).unwrap();
+        assert!(out.warnings.is_empty(), "{:?}", out.warnings);
+        assert!(out.set.icls.contains_key("23.icl") && out.set.icls.contains_key("42.icl"));
+        let rows: Vec<_> = out.set.touch.as_ref().unwrap().records.iter().filter(|r| r.page() == 1).map(|r| r.params().unwrap()).collect();
+        assert_eq!(rows.len(), 4);
+        assert!(rows[3].contains(&("key", Value::Num(4))));
+        // The 3 MB ASCII font fills slots 0..11, so pages at 5 would be overwritten.
+        p.page_lib = 5;
+        let out = build(&p, Path::new(".")).unwrap();
+        assert!(out.warnings.iter().any(|w| w.contains("0_DWIN_ASC.HZK") && w.contains("5.icl")), "{:?}", out.warnings);
     }
 
     #[test]

@@ -119,7 +119,7 @@ impl Sim {
     fn interactive(w: &Widget) -> bool {
         matches!(
             w.kind,
-            WidgetKind::Button { .. } | WidgetKind::Toggle { .. } | WidgetKind::Slider { .. } | WidgetKind::Dropdown { .. }
+            WidgetKind::Button { .. } | WidgetKind::Toggle { .. } | WidgetKind::Slider { .. } | WidgetKind::Dropdown { .. } | WidgetKind::List { .. }
                 | WidgetKind::Gauge { knob: true, .. }
                 | WidgetKind::Number { input: Some(_), .. } | WidgetKind::Text { input: true, .. }
         )
@@ -267,6 +267,11 @@ impl Sim {
                 self.send(vp?);
             }
             WidgetKind::Slider { .. } | WidgetKind::Gauge { .. } => self.drag(p, x, y),
+            WidgetKind::List { items, .. } => {
+                let row = (y - w.y) * items.len().max(1) as i32 / w.h.max(1);
+                self.set(vp?, row as u16 + 1);
+                self.send(vp?);
+            }
             WidgetKind::Number { dec_digits, input: Some((min, max)), .. } => {
                 return Some(Prompt::Number { vp: vp?, dec: *dec_digits, min: *min, max: *max })
             }
@@ -461,7 +466,7 @@ impl Sim {
                     draw_state(&mut px, w, (v >> (b % 16) & 1) as usize, base)
                 }
                 WidgetKind::Toggle { .. } | WidgetKind::Lamp { .. } => draw_state(&mut px, w, (v != 0) as usize, base),
-                WidgetKind::Icons { .. } | WidgetKind::Dropdown { .. } => draw_state(&mut px, w, v as usize, base),
+                WidgetKind::Icons { .. } | WidgetKind::Dropdown { .. } | WidgetKind::List { .. } => draw_state(&mut px, w, v as usize, base),
                 WidgetKind::Animation { images, period_ms, .. } => {
                     let n = images.len().max(1) as u64;
                     let f = if v == 1 { ms / (*period_ms).max(8) as u64 % n } else { 0 };
@@ -576,6 +581,9 @@ mod tests {
         let p = Project {
             width: 800,
             height: 480,
+            page_lib: 32,
+            icon_lib: 48,
+            font: None,
             pages: vec![
                 Page { name: "a".into(), bg: [0; 3], bg_image: None, swipe: (None, None), widgets: vec![
                     Widget::new(kind("Button"), "key", 0, 0),          // VP 0x1000, key 1

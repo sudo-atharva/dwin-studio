@@ -20,8 +20,30 @@ pub enum Mode {
     Base,
 }
 
+/// Font file in use (path, bytes). None = bundled Ubuntu Light.
+static FONT: Mutex<Option<(PathBuf, &'static [u8])>> = Mutex::new(None);
+
 fn font() -> FontRef<'static> {
-    FontRef::try_from_slice(epaint_default_fonts::UBUNTU_LIGHT).expect("bundled font")
+    let bytes = FONT.lock().unwrap().as_ref().map_or(epaint_default_fonts::UBUNTU_LIGHT, |f| f.1);
+    FontRef::try_from_slice(bytes).expect("checked in set_font")
+}
+
+/// Switch the drawing font (preview, page images, HZK). Returns true if it changed.
+/// Unreadable or invalid files fall back to the bundled font.
+/// ponytail: font bytes are leaked once per distinct font chosen; fine for an editor session.
+pub fn set_font(path: Option<&Path>) -> bool {
+    let mut cur = FONT.lock().unwrap();
+    if cur.as_ref().map(|f| f.0.as_path()) == path {
+        return false;
+    }
+    let loaded = path.and_then(|p| {
+        let bytes = std::fs::read(p).ok()?;
+        FontRef::try_from_slice(&bytes).ok()?;
+        Some((p.to_path_buf(), &*Box::leak(bytes.into_boxed_slice())))
+    });
+    let changed = cur.as_ref().map(|f| &f.0) != loaded.as_ref().map(|f| &f.0);
+    *cur = loaded;
+    changed
 }
 
 /// Decoded images by path. ponytail: never invalidated; restart editor after editing an asset file.
@@ -186,6 +208,19 @@ pub fn draw_state(px: &mut Pixmap, w: &Widget, state: usize, base: &Path) {
             let d = w.h as f32;
             rounded(px, (w.x as f32, w.y as f32, d, d), d / 2.0, *knob);
         }
+        WidgetKind::List { items, size, fg, bg, sel, .. } => {
+            // state = selected row + 1 (0 = none).
+            let (x, y, ww, hh) = frect(w);
+            let rh = hh / items.len().max(1) as f32;
+            rounded(px, (x, y, ww, hh), 0.0, *bg);
+            for (i, it) in items.iter().enumerate() {
+                let ry = y + i as f32 * rh;
+                if state == i + 1 {
+                    rounded(px, (x, ry, ww, rh), 0.0, *sel);
+                }
+                text(px, it, x + 12.0, ry + (rh - size) / 2.0, *size, *fg);
+            }
+        }
         WidgetKind::Dropdown { options, size, fg, .. } => {
             let t = options.get(state).map_or("", |s| s.as_str());
             text(px, t, w.x as f32 + 12.0, w.y as f32 + (w.h as f32 - size) / 2.0, *size, *fg);
@@ -303,7 +338,9 @@ pub fn render(page: &Page, width: u16, height: u16, mode: Mode, base: &Path) -> 
                 let r = if *vertical { (x + 1.0, y + hh * 0.6, ww - 2.0, hh * 0.4 - 1.0) } else { (x + 1.0, y + 1.0, ww * 0.4, hh - 2.0) };
                 rounded(&mut px, r, 0.0, *fg);
             }
-            WidgetKind::Toggle { .. } | WidgetKind::Lamp { .. } | WidgetKind::Icons { .. } | WidgetKind::Animation { .. } if dynamic => {
+            WidgetKind::Toggle { .. } | WidgetKind::Lamp { .. } | WidgetKind::Icons { .. } | WidgetKind::Animation { .. } | WidgetKind::List { .. }
+                if dynamic =>
+            {
                 draw_state(&mut px, w, 0, base)
             }
             // Editable fields get a box so the operator sees where to tap.

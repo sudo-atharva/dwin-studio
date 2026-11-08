@@ -16,6 +16,24 @@ pub struct Project {
     pub width: u16,
     pub height: u16,
     pub pages: Vec<Page>,
+    /// Icon library numbers in DWIN_SET: page pictures (DGUS default 32) and generated
+    /// icons (toggle states, knobs, list states...). Must match what the screen expects.
+    #[serde(default = "page_lib")]
+    pub page_lib: u8,
+    #[serde(default = "icon_lib")]
+    pub icon_lib: u8,
+    /// TTF/OTF (relative to the project) for previews and the screen's ASCII font
+    /// (0_DWIN_ASC.HZK). None = built-in Ubuntu.
+    #[serde(default)]
+    pub font: Option<String>,
+}
+
+fn page_lib() -> u8 {
+    32
+}
+
+fn icon_lib() -> u8 {
+    48
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -117,6 +135,9 @@ pub enum WidgetKind {
     },
     /// Shows `images[v]` for VP value v (status lights, battery, modes...).
     Icons { vp: Option<u16>, images: Vec<String> },
+    /// Items stacked in rows. Tapping row i highlights it and sends VP = i + 1 (0 = none
+    /// selected), so a separate "OK" button can act on the choice.
+    List { vp: Option<u16>, items: Vec<String>, size: f32, fg: Rgb, bg: Rgb, sel: Rgb },
     /// Tap opens a list; picking item i writes i to VP and shows it in the box.
     Dropdown { vp: Option<u16>, options: Vec<String>, size: f32, fg: Rgb, bg: Rgb },
     /// Screen's real-time clock. `format`: Y M D H Q(minute) S W(weekday), other chars as-is.
@@ -167,6 +188,7 @@ impl WidgetKind {
             | WidgetKind::Slider { vp, .. }
             | WidgetKind::Icons { vp, .. }
             | WidgetKind::Dropdown { vp, .. }
+            | WidgetKind::List { vp, .. }
             | WidgetKind::Qr { vp, .. }
             | WidgetKind::Progress { vp, .. }
             | WidgetKind::Gauge { vp, .. }
@@ -195,6 +217,7 @@ impl Widget {
             WidgetKind::Slider { .. } => (300, 40),
             WidgetKind::Icons { .. } => (64, 64),
             WidgetKind::Dropdown { .. } => (200, 44),
+            WidgetKind::List { .. } => (260, 180),
             WidgetKind::Clock { .. } => (320, 32),
             WidgetKind::Qr { .. } => (120, 120),
             WidgetKind::Progress { .. } => (300, 24),
@@ -219,6 +242,7 @@ impl Widget {
             WidgetKind::Slider { .. } => "Slider",
             WidgetKind::Icons { .. } => "Icons",
             WidgetKind::Dropdown { .. } => "Dropdown",
+            WidgetKind::List { .. } => "List",
             WidgetKind::Clock { .. } => "Clock",
             WidgetKind::Qr { .. } => "QR Code",
             WidgetKind::Progress { .. } => "Progress",
@@ -266,6 +290,10 @@ pub fn default_widgets() -> Vec<(&'static str, WidgetKind)> {
             vp: None, options: vec!["Option A".into(), "Option B".into(), "Option C".into()],
             size: 22.0, fg: [255; 3], bg: [51, 65, 85],
         }),
+        ("List", WidgetKind::List {
+            vp: None, items: vec!["Program 1".into(), "Program 2".into(), "Program 3".into(), "Program 4".into()],
+            size: 22.0, fg: [255; 3], bg: [30, 41, 59], sel: [37, 99, 235],
+        }),
         ("Progress", WidgetKind::Progress {
             vp: None, min: 0, max: 100, fg: [34, 197, 94], bg: [51, 65, 85], border: [148, 163, 184], vertical: false,
         }),
@@ -284,6 +312,9 @@ impl Default for Project {
         Self {
             width: 800,
             height: 480,
+            page_lib: page_lib(),
+            icon_lib: icon_lib(),
+            font: None,
             pages: vec![Page { name: "home".into(), bg: [15, 23, 42], bg_image: None, swipe: (None, None), widgets: vec![] }],
         }
     }

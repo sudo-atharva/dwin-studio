@@ -220,6 +220,20 @@ impl App {
         }
     }
 
+    /// Choose a TTF/OTF; it is copied into assets/ like images.
+    fn pick_font(&mut self) {
+        if self.path.is_none() && !self.save(true) {
+            return;
+        }
+        let Some(f) = rfd::FileDialog::new().add_filter("Fonts", &["ttf", "otf"]).pick_file() else { return };
+        let Some(name) = f.file_name() else { return };
+        let dir = self.base().join("assets");
+        match std::fs::create_dir_all(&dir).and_then(|_| std::fs::copy(&f, dir.join(name))) {
+            Ok(_) => self.project.font = Some(format!("assets/{}", name.to_string_lossy())),
+            Err(e) => self.status = format!("Font copy failed: {e}"),
+        }
+    }
+
     fn import_assets(&mut self) {
         if self.path.is_none() && !self.save(true) {
             self.status = "Save the project first: images are copied next to it in assets/".into();
@@ -728,6 +742,35 @@ impl App {
     }
 
     fn left_panel(&mut self, ui: &mut egui::Ui) {
+        CollapsingHeader::new("PROJECT").default_open(false).show(ui, |ui| {
+            egui::Grid::new("libs").num_columns(2).show(ui, |ui| {
+                ui.label("Page pictures");
+                ui.horizontal(|ui| {
+                    ui.add(egui::DragValue::new(&mut self.project.page_lib).range(1..=255));
+                    ui.label(".icl");
+                });
+                ui.end_row();
+                ui.label("Icons");
+                ui.horizontal(|ui| {
+                    ui.add(egui::DragValue::new(&mut self.project.icon_lib).range(1..=255));
+                    ui.label(".icl");
+                });
+                ui.end_row();
+                ui.label("Font");
+                ui.horizontal(|ui| {
+                    let name = self.project.font.as_deref().map_or("built-in".to_string(), |f| f.trim_start_matches("assets/").to_string());
+                    if ui.button(name).on_hover_text("TTF/OTF for previews and the screen's ASCII font (0_DWIN_ASC.HZK)").clicked() {
+                        self.pick_font();
+                    }
+                    if self.project.font.is_some() && ui.small_button("✕").clicked() {
+                        self.project.font = None;
+                    }
+                });
+                ui.end_row();
+            });
+            ui.label(RichText::new("DGUS default: pages 32.icl. Use what your screen's firmware expects (e.g. 23 / 32 pages, 41-48 icons).").weak().small());
+        });
+
         CollapsingHeader::new("SCREEN SIZE").default_open(false).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.add(egui::DragValue::new(&mut self.project.width).range(16..=4096));
@@ -1030,6 +1073,21 @@ impl App {
                     ui.end_row();
                     ui.label("Scroll");
                     ui.checkbox(scroll, "marquee");
+                    ui.end_row();
+                }
+                WidgetKind::List { items, size, fg, bg, sel, .. } => {
+                    ui.label("Items\n(one per line)");
+                    let mut s = items.join("\n");
+                    if ui.add(egui::TextEdit::multiline(&mut s).desired_rows(5)).changed() {
+                        *items = s.lines().map(str::to_string).collect();
+                    }
+                    ui.end_row();
+                    size_row(ui, size);
+                    color_row(ui, "Text color", fg);
+                    color_row(ui, "Fill", bg);
+                    color_row(ui, "Selected", sel);
+                    ui.label("");
+                    ui.label(RichText::new("Tap row n sends VP = n (0 = none).\nAdd a Button (send key) as OK.").weak().small());
                     ui.end_row();
                 }
                 WidgetKind::Dropdown { options, size, fg, bg, .. } => {
@@ -1447,6 +1505,7 @@ fn kind_icon(k: &WidgetKind) -> &'static str {
         WidgetKind::Slider { .. } => "━",
         WidgetKind::Icons { .. } => "◈",
         WidgetKind::Dropdown { .. } => "▾",
+        WidgetKind::List { .. } => "☰",
         WidgetKind::Clock { .. } => "◷",
         WidgetKind::Qr { .. } => "▦",
         WidgetKind::Progress { .. } => "▬",
@@ -1460,7 +1519,7 @@ fn kind_icon(k: &WidgetKind) -> &'static str {
 /// Palette groups, EEZ-style. Names match `default_widgets()`; anything new lands in "More".
 const GROUPS: &[(&str, &[&str])] = &[
     ("Basic", &["Label", "Panel", "Button", "+ / − Button"]),
-    ("Input", &["Number Input", "Text Input", "Toggle", "Slider", "Knob", "Dropdown"]),
+    ("Input", &["Number Input", "Text Input", "Toggle", "Slider", "Knob", "Dropdown", "List"]),
     ("Display", &["Number", "Big Number", "Text", "Scrolling Text", "Lamp", "Icons", "Progress", "Gauge", "Clock", "QR Code"]),
     ("Graphics", &["Chart", "Drawing", "Animation"]),
 ];
@@ -1540,6 +1599,10 @@ fn vp_editor(ui: &mut egui::Ui, vp: &mut Option<u16>, resolved: Option<u16>) {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let before = self.project.clone();
+        let font = self.project.font.as_ref().map(|f| self.base().join(f));
+        if dwin_studio::render::set_font(font.as_deref()) {
+            self.rendered = None; // redraw with the new font
+        }
         if self.sim.is_some() {
             self.pump();
             egui::Panel::top("toolbar").show(ui, |ui| {
