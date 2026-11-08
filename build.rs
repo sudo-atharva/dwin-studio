@@ -3,8 +3,8 @@ fn main() {
     #[cfg(windows)]
     winresource::WindowsResource::new()
         .set_icon("assets/icon.ico")
-        .set("ProductName", "DWIN Studio")
-        .set("FileDescription", "DWIN Studio - DGUS screen editor")
+        .set("ProductName", "UWIN Studio")
+        .set("FileDescription", "UWIN Studio - DGUS screen editor")
         .compile()
         .expect("embed icon");
 }

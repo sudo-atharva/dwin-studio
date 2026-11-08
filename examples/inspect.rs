@@ -1,8 +1,8 @@
 //! Print every control in a DWIN_SET folder with its named fields.
 //! cargo run --example inspect -- <path/to/DWIN_SET>
 
-use dwin_studio::control::{show_kind, show_params, Params, Value};
-use dwin_studio::set::DwinSet;
+use uwin_studio::control::{show_kind, show_params, Params, Value};
+use uwin_studio::set::DwinSet;
 
 fn fmt(p: &Params) -> String {
     p.iter()

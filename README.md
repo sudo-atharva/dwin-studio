@@ -1,6 +1,6 @@
-<p align="center"><img src="docs/icon.png" width="96" alt="DWIN Studio icon"></p>
+<p align="center"><img src="docs/icon.png" width="96" alt="UWIN Studio icon"></p>
 
-<h1 align="center">DWIN Studio</h1>
+<h1 align="center">UWIN Studio</h1>
 
 <p align="center">
 A visual screen editor for DWIN T5L (DGUS II) displays.<br>
@@ -15,7 +15,7 @@ It can replace DGUS V7.6.
 ## Why
 
 DGUS works, but it's slow to use: VP addresses typed by hand, separate tools for fonts
-and icons, no way to try a screen without the hardware. DWIN Studio is one program
+and icons, no way to try a screen without the hardware. UWIN Studio is one program
 that does the whole job, in an editor that feels like VS Code or EEZ Studio.
 
 ## Features
@@ -57,18 +57,18 @@ Screens can also change by swiping and with page buttons. Several toggles and la
 
 ## Get it
 
-**Windows:** download `DWIN-Studio-1.0.0-windows.zip` from
-[Releases](../../releases), unzip it and run `DWIN Studio.exe`. Nothing to install.
-`.dwin` project files open with a double-click once you've opened one through the app.
+**Windows:** download `UWIN-Studio-1.0.0-windows.zip` from
+[Releases](../../releases), unzip it and run `UWIN Studio.exe`. Nothing to install.
+`.uwin` project files open with a double-click once you've opened one through the app.
 
 **From source** (any OS with Rust 1.85+):
 
 ```sh
-git clone https://github.com/sudo-atharva/dwin-studio
-cd dwin-studio
+git clone https://github.com/sudo-atharva/uwin-studio
+cd uwin-studio
 cargo run --release                      # editor
-cargo run --release -- build examples/demo.dwin out   # headless build
-cargo run --release -- import path/to/DWIN_SET my.dwin  # open an old DGUS project
+cargo run --release -- build examples/demo.uwin out   # headless build
+cargo run --release -- import path/to/DWIN_SET my.uwin  # open an old DGUS project
 ```
 
 ## How to use it
@@ -93,7 +93,7 @@ MCU switches page:      5A A5 07 82 00 84 5A 01 <page hi> <page lo>
 | Folder | What's in it |
 |---|---|
 | [`examples/showcase`](examples/showcase) | **Every widget** on 4 screens, plus an [Arduino sketch](examples/showcase/arduino/showcase/showcase.ino) that drives all of them (Mega, ESP32, Leonardo, ...). |
-| [`examples/demo.dwin`](examples/demo.dwin) | A welder control panel: 3 screens. |
+| [`examples/demo.uwin`](examples/demo.uwin) | A welder control panel: 3 screens. |
 
 ![Showcase screens as built (live values are drawn by the display)](docs/showcase-screens.jpg)
 
@@ -117,7 +117,7 @@ An AI agent can make one by writing that file. The fields are documented in
 
 ## AI agents (MCP)
 
-DWIN Studio has an MCP server built in. Connect it to an AI assistant, give the assistant
+UWIN Studio has an MCP server built in. Connect it to an AI assistant, give the assistant
 a flow chart and say what each button does, and it builds the screens, checks them with
 screenshots, runs the build and taps through them in the simulator.
 
@@ -126,8 +126,8 @@ screenshots, runs the build and taps through them in the simulator.
 ```json
 {
   "mcpServers": {
-    "dwin-studio": {
-      "command": "C:/path/to/DWIN Studio.exe",
+    "uwin-studio": {
+      "command": "C:/path/to/UWIN Studio.exe",
       "args": ["mcp"]
     }
   }
@@ -137,14 +137,14 @@ screenshots, runs the build and taps through them in the simulator.
 **Claude Code:**
 
 ```sh
-claude mcp add dwin-studio -- "C:/path/to/DWIN Studio.exe" mcp
+claude mcp add uwin-studio -- "C:/path/to/UWIN Studio.exe" mcp
 ```
 
-Any other MCP client works the same way: run `dwin-studio mcp` (JSON-RPC over stdio).
+Any other MCP client works the same way: run `uwin-studio mcp` (JSON-RPC over stdio).
 
 Then ask, for example:
 
-> Make pump.dwin, 800x480. HOME: title "Pump Controller", START and STOP buttons that tell
+> Make pump.uwin, 800x480. HOME: title "Pump Controller", START and STOP buttons that tell
 > the MCU, a flow-rate number from the MCU, a Settings button. SETTINGS: speed setpoint
 > the user types (0-100 %), Back button. Build it and test it in the simulator.
 
@@ -158,15 +158,15 @@ Then ask, for example:
 | `screenshot` | PNG of a screen, or of the running simulator |
 | `sim_start`, `sim_tap`, `sim_drag`, `sim_type`, `sim_send`, `sim_read` | run the simulator: touch, type, MCU frames, read values |
 
-Every edit is saved to the `.dwin` file right away. Open the file in the editor to see the
+Every edit is saved to the `.uwin` file right away. Open the file in the editor to see the
 result or keep working on it by hand.
 
-Without MCP, agents can still write `.dwin` files directly (plain JSON), build with
-`dwin-studio build project.dwin out_dir` and import with `dwin-studio import DWIN_SET new.dwin`.
+Without MCP, agents can still write `.uwin` files directly (plain JSON), build with
+`uwin-studio build project.uwin out_dir` and import with `uwin-studio import DWIN_SET new.uwin`.
 
 ## Project files
 
-A project is one `.dwin` file. It's plain JSON, so it diffs well in git and can be
+A project is one `.uwin` file (files from before the rename, `.dwin`, still open). It's plain JSON, so it diffs well in git and can be
 generated by scripts or AI tools. Pictures are referenced by relative path
 (e.g. `assets/logo.png`).
 
@@ -200,8 +200,8 @@ projects (`DWIN_Training_Demos-master`, `DWIN2_Display-main`) are in a `samples`
 - [ ] Generate `T5LCFG.CFG` instead of copying it
 - [ ] DGUS extras: page transitions, video, camera, icon drag, parameter settings
 
-**Next: open the `.dwin` format to other tools**
-- [ ] **Export to LVGL:** turn a `.dwin` project into LVGL v9 C code (`ui.c` / `ui.h`,
+**Next: open the `.uwin` format to other tools**
+- [ ] **Export to LVGL:** turn a `.uwin` project into LVGL v9 C code (`ui.c` / `ui.h`,
       screens, styles, images, fonts) for ESP32, STM32, RP2040 and any display LVGL supports
 - [ ] Export to EEZ Studio / SquareLine-style projects, and import back
 - [ ] MCU library generator: typed `on_<widget>()` callbacks and `set_<widget>()` calls for
@@ -212,7 +212,7 @@ projects (`DWIN_Training_Demos-master`, `DWIN2_Display-main`) are in a `samples`
 - [ ] Web version (runs in the browser, same editor)
 
 **Goal: DWIN replacement framework**
-- [ ] Open firmware that runs `.dwin` projects on ordinary hardware (for example ESP32-S3 or
+- [ ] Open firmware that runs `.uwin` projects on ordinary hardware (for example ESP32-S3 or
       RP2040 with any TFT and touch panel) using LVGL
 - [ ] Speaks the same DGUS UART protocol (`5A A5 ... 82/83`), so an existing MCU board
       works with it unchanged: swap the DWIN display for any cheap screen

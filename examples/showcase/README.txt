@@ -1,10 +1,10 @@
-DWIN Studio showcase
+UWIN Studio showcase
 ====================
 
-One of every widget DWIN Studio has, on 4 screens, plus an Arduino sketch that
+One of every widget UWIN Studio has, on 4 screens, plus an Arduino sketch that
 drives all of them.
 
-  showcase.dwin              the project: double-click to open it in DWIN Studio
+  showcase.uwin              the project: double-click to open it in UWIN Studio
   assets\                    pictures used by the battery icons, fan animation, logo
   output\DWIN_SET\           built screen files: copy this folder to the SD card
   output\ui_map.txt          every address, what it does, the UART frames
@@ -33,7 +33,7 @@ What the sketch does
 Wiring: display TX -> board RX1, display RX -> board TX1, GND -> GND.
         ESP32: RX = GPIO16, TX = GPIO17. 115200 baud, CRC off.
 
-No display yet? Open showcase.dwin, press Simulate, pick the board's COM port:
+No display yet? Open showcase.uwin, press Simulate, pick the board's COM port:
 the PC acts as the screen.
 
 After changing the project: Build, then copy the new ui_gen.h into

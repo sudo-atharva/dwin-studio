@@ -1,13 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-//! DWIN Studio editor: design pages, build DWIN_SET for the SD card.
+//! UWIN Studio editor: design pages, build DWIN_SET for the SD card.
 //! Layout follows LVGL-style editors: screens / hierarchy / widgets / assets left,
 //! canvas center (zoom, pan, multi-select, align), inspector right, address map bottom.
 
-use dwin_studio::build::{allocate, build, Alloc, Output};
-use dwin_studio::project::{default_widgets, Event, Page, Project, Widget, WidgetKind, PRESETS};
-use dwin_studio::render::{load_image, render, Mode};
-use dwin_studio::sim::Sim;
-use dwin_studio::snap::{lines, snap_axis};
+use uwin_studio::build::{allocate, build, Alloc, Output};
+use uwin_studio::project::{default_widgets, Event, Page, Project, Widget, WidgetKind, PRESETS};
+use uwin_studio::render::{load_image, render, Mode};
+use uwin_studio::sim::Sim;
+use uwin_studio::snap::{lines, snap_axis};
 use std::io::{Read, Write};
 use std::sync::mpsc;
 use std::time::Duration;
@@ -29,7 +29,7 @@ fn write_output(o: &Output, dir: &Path) -> Result<(), Box<dyn std::error::Error>
     Ok(())
 }
 
-/// `dwin-studio build <project.dwin> <out dir>`: headless build, prints warnings.
+/// `uwin-studio build <project.uwin> <out dir>`: headless build, prints warnings.
 fn cli_build(project: &str, out: &str) -> Result<(), Box<dyn std::error::Error>> {
     let p: Project = serde_json::from_str(&std::fs::read_to_string(project)?)?;
     let base = Path::new(project).parent().unwrap_or(Path::new("."));
@@ -63,23 +63,23 @@ fn main() -> eframe::Result {
                 std::process::exit(1);
             }
         } else {
-            eprintln!("usage: dwin-studio build <project.dwin> <out dir>");
+            eprintln!("usage: uwin-studio build <project.uwin> <out dir>");
         }
         return Ok(());
     }
     if args.get(1).map(String::as_str) == Some("mcp") {
         // AI assistants start this and talk JSON-RPC over stdin/stdout.
-        dwin_studio::mcp::serve(std::io::stdin().lock(), std::io::stdout().lock());
+        uwin_studio::mcp::serve(std::io::stdin().lock(), std::io::stdout().lock());
         return Ok(());
     }
     if args.get(1).map(String::as_str) == Some("import") {
         let [_, _, dir, out] = &args[..] else {
-            eprintln!("usage: dwin-studio import <DWIN_SET dir> <new.dwin>");
+            eprintln!("usage: uwin-studio import <DWIN_SET dir> <new.uwin>");
             return Ok(());
         };
         let out = Path::new(out);
         let folder = out.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
-        match dwin_studio::import::import(Path::new(dir), folder) {
+        match uwin_studio::import::import(Path::new(dir), folder) {
             Ok((p, report)) => {
                 std::fs::write(out, serde_json::to_string_pretty(&p).unwrap()).expect("write project");
                 println!("{}", report.join("
@@ -101,7 +101,7 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
     eframe::run_native(
-        "DWIN Studio",
+        "UWIN Studio",
         options,
         Box::new(|cc| {
             let app = App::open(path);
@@ -264,7 +264,7 @@ impl App {
 
     fn save(&mut self, ask: bool) -> bool {
         if ask || self.path.is_none() {
-            let dlg = rfd::FileDialog::new().add_filter("DWIN Studio project", &["dwin", "json"]).set_file_name("project.dwin");
+            let dlg = rfd::FileDialog::new().add_filter("UWIN Studio project", &["dwin", "json"]).set_file_name("project.uwin");
             let Some(p) = dlg.save_file() else { return false };
             self.path = Some(p);
             self.refresh_assets();
@@ -286,10 +286,10 @@ impl App {
     /// DWIN_SET folder -> new project saved where the user says (pictures go to its assets/).
     fn import_dgus(&mut self) {
         let Some(dir) = rfd::FileDialog::new().set_title("DGUS DWIN_SET folder to import").pick_folder() else { return };
-        let dlg = rfd::FileDialog::new().set_title("Save the imported project as").add_filter("DWIN Studio project", &["dwin", "json"]);
-        let Some(out) = dlg.set_file_name("imported.dwin").save_file() else { return };
+        let dlg = rfd::FileDialog::new().set_title("Save the imported project as").add_filter("UWIN Studio project", &["dwin", "json"]);
+        let Some(out) = dlg.set_file_name("imported.uwin").save_file() else { return };
         let folder = out.parent().unwrap_or(Path::new(".")).to_path_buf();
-        match dwin_studio::import::import(&dir, &folder) {
+        match uwin_studio::import::import(&dir, &folder) {
             Ok((p, report)) => {
                 let saved = serde_json::to_string_pretty(&p).map_err(|e| e.to_string()).and_then(|j| std::fs::write(&out, j).map_err(|e| e.to_string()));
                 if let Err(e) = saved {
@@ -543,7 +543,7 @@ impl App {
 
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.label(RichText::new("DWIN Studio").strong().color(ACCENT));
+            ui.label(RichText::new("UWIN Studio").strong().color(ACCENT));
             ui.separator();
             if ui.button("🗋 New").clicked() {
                 self.undo.push(std::mem::take(&mut self.project));
@@ -553,7 +553,7 @@ impl App {
                 self.assets.clear();
             }
             if ui.button("📂 Open").clicked() {
-                if let Some(p) = rfd::FileDialog::new().add_filter("DWIN Studio project", &["dwin", "json"]).pick_file() {
+                if let Some(p) = rfd::FileDialog::new().add_filter("UWIN Studio project", &["dwin", "json"]).pick_file() {
                     self.load(p);
                 }
             }
@@ -1935,7 +1935,7 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let before = self.project.clone();
         let font = self.project.font.as_ref().map(|f| self.base().join(f));
-        if dwin_studio::render::set_font(font.as_deref()) {
+        if uwin_studio::render::set_font(font.as_deref()) {
             self.rendered = None; // redraw with the new font
         }
         self.status_bar(ui);
@@ -1978,7 +1978,7 @@ impl eframe::App for App {
             self.undo.push(before);
             self.redo.clear();
         }
-        let title = format!("DWIN Studio {VERSION} - {}", self.path.as_ref().map_or("untitled".into(), |p| p.display().to_string()));
+        let title = format!("UWIN Studio {VERSION} - {}", self.path.as_ref().map_or("untitled".into(), |p| p.display().to_string()));
         if title != self.title {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
             self.title = title;

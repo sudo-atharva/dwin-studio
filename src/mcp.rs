@@ -1,4 +1,4 @@
-//! MCP server (`dwin-studio mcp`): lets an AI assistant (Claude Desktop, Claude Code, ...)
+//! MCP server (`uwin-studio mcp`): lets an AI assistant (Claude Desktop, Claude Code, ...)
 //! create and edit projects, build DWIN_SET and drive the simulator.
 //! JSON-RPC 2.0 over stdio, one message per line.
 
@@ -10,10 +10,10 @@ use serde_json::{json, Value};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
-const INSTRUCTIONS: &str = r#"DWIN Studio designs touch screens for DWIN T5L (DGUS II) displays and builds the DWIN_SET folder that goes on the display's SD card.
+const INSTRUCTIONS: &str = r#"UWIN Studio designs touch screens for DWIN T5L (DGUS II) displays and builds the DWIN_SET folder that goes on the display's SD card.
 
 Typical job: the user gives a flow chart / list of screens and what each button does. Then:
-1. new_project (path ending in .dwin, screen size) or open_project.
+1. new_project (path ending in .uwin, screen size) or open_project.
 2. One add_screen per screen in the flow chart. Screens are numbered from 0 in creation order.
 3. add_widget for everything on each screen. widget_types lists every type with its default properties.
    - Navigation button: type "Button", props {"text": "...", "goto": <screen index>, "event": "None"}.
@@ -31,7 +31,7 @@ Typical job: the user gives a flow chart / list of screens and what each button 
 4. screenshot each screen to check the layout, fix with update_widget.
 5. build: writes DWIN_SET, ui_map.txt (all addresses + UART frames) and ui_gen.h. Fix any warnings.
 6. Optionally test: sim_start, sim_tap / sim_drag / sim_type, sim_read, sim_send (frames from the MCU).
-Edits are saved to the .dwin file right away; the DWIN Studio editor shows them after reopening the file."#;
+Edits are saved to the .uwin file right away; the UWIN Studio editor shows them after reopening the file."#;
 
 struct Server {
     project: Project,
@@ -50,7 +50,7 @@ pub fn serve(input: impl BufRead, mut output: impl Write) {
             "initialize" => json!({"jsonrpc": "2.0", "id": id, "result": {
                 "protocolVersion": params["protocolVersion"].as_str().unwrap_or("2025-06-18"),
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "dwin-studio", "version": env!("CARGO_PKG_VERSION")},
+                "serverInfo": {"name": "uwin-studio", "version": env!("CARGO_PKG_VERSION")},
                 "instructions": INSTRUCTIONS,
             }}),
             "ping" => json!({"jsonrpc": "2.0", "id": id, "result": {}}),
@@ -80,9 +80,9 @@ fn tools() -> Vec<Value> {
     let int = |d: &str| json!({"type": "integer", "description": d});
     let props = json!({"type": "object", "description": "Type-specific properties to set, e.g. {\"text\": \"Start\", \"goto\": 2} (see widget_types)"});
     vec![
-        tool("new_project", "Start a new project and save it to `path` (.dwin).", json!({
+        tool("new_project", "Start a new project and save it to `path` (.uwin).", json!({
             "path": {"type": "string"}, "width": int("Screen width in pixels (default 800)"), "height": int("Screen height (default 480)")}), &["path"]),
-        tool("open_project", "Open an existing .dwin project.", json!({"path": {"type": "string"}}), &["path"]),
+        tool("open_project", "Open an existing .uwin project.", json!({"path": {"type": "string"}}), &["path"]),
         tool("get_project", "Summary of screens and widgets. full=true returns the whole project JSON.", json!({"full": {"type": "boolean"}}), &[]),
         tool("set_project", "Replace the whole project with this JSON (same format as get_project full=true). Fastest way to create many screens at once.",
             json!({"project": {"type": "object"}}), &["project"]),
@@ -240,7 +240,7 @@ impl Server {
             "open_project" => {
                 let path = PathBuf::from(s(a, "path").ok_or("path missing")?);
                 let txt = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-                self.project = serde_json::from_str(&txt).map_err(|e| format!("not a DWIN Studio project: {e}"))?;
+                self.project = serde_json::from_str(&txt).map_err(|e| format!("not a UWIN Studio project: {e}"))?;
                 (self.path, self.sim) = (Some(path), None);
                 self.summary()
             }
@@ -475,9 +475,9 @@ mod tests {
     fn flow_chart_to_working_screens() {
         assert_eq!(base64(b"Man"), "TWFu");
         assert_eq!(base64(b"Ma"), "TWE=");
-        let dir = std::env::temp_dir().join("dwin_mcp_test");
+        let dir = std::env::temp_dir().join("uwin_mcp_test");
         let _ = std::fs::create_dir_all(&dir);
-        let path = dir.join("t.dwin");
+        let path = dir.join("t.uwin");
         let r = rpc(&[
             json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}}),
             json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
@@ -498,7 +498,7 @@ mod tests {
             call(14, "sim_read", json!({})),
         ]);
         assert_eq!(r.len(), 14, "one reply per request, none for the notification");
-        assert_eq!(r[0]["result"]["serverInfo"]["name"], "dwin-studio");
+        assert_eq!(r[0]["result"]["serverInfo"]["name"], "uwin-studio");
         assert!(r[1]["result"]["tools"].as_array().unwrap().len() >= 15);
         let txt = |i: usize| r[i]["result"]["content"][0]["text"].as_str().unwrap().to_string();
         assert!(txt(4).contains("added Button 'to_settings'"), "{}", txt(4));
