@@ -1,7 +1,7 @@
 //! Parse every real DGUS output folder next to this project and re-emit it.
 //! Must be byte-identical to what DGUS wrote.
 
-use dwin_studio::set::DwinSet;
+use uwin_studio::set::DwinSet;
 use std::path::PathBuf;
 
 fn sample_dirs() -> Vec<PathBuf> {
@@ -49,7 +49,7 @@ fn sample_icons_decode_and_repack() {
                 let img = icon.decode().unwrap_or_else(|e| panic!("{name}[{i}]: {e}"));
                 assert_eq!((img.width(), img.height()), (icon.width as u32, icon.height as u32));
                 let jpeg = icon.to_jpeg().unwrap();
-                let re = dwin_studio::picture::pack_jpeg(&jpeg, icon.width, icon.height).unwrap();
+                let re = uwin_studio::picture::pack_jpeg(&jpeg, icon.width, icon.height).unwrap();
                 assert!(re == *icon, "{}/{name}[{i}]: repack differs", dir.display());
             }
         }
@@ -60,7 +60,7 @@ fn sample_icons_decode_and_repack() {
 /// Proves the field tables cover every non-zero byte DGUS writes.
 #[test]
 fn typed_controls_roundtrip() {
-    use dwin_studio::control::{show_kind, show_params, show_record};
+    use uwin_studio::control::{show_kind, show_params, show_record};
     use std::collections::BTreeMap;
 
     let mut seen: BTreeMap<String, usize> = BTreeMap::new();
@@ -103,10 +103,10 @@ fn typed_controls_roundtrip() {
 /// Both shipped examples load and build with no warnings (VP clashes, overlaps, bad targets).
 #[test]
 fn examples_build_clean() {
-    for f in ["examples/demo.dwin", "examples/showcase/showcase.dwin"] {
-        let p: dwin_studio::project::Project = serde_json::from_str(&std::fs::read_to_string(f).unwrap()).unwrap();
+    for f in ["examples/demo.uwin", "examples/showcase/showcase.uwin"] {
+        let p: uwin_studio::project::Project = serde_json::from_str(&std::fs::read_to_string(f).unwrap()).unwrap();
         let dir = std::path::Path::new(f).parent().unwrap();
-        let out = dwin_studio::build::build(&p, dir).unwrap();
+        let out = uwin_studio::build::build(&p, dir).unwrap();
         assert!(out.warnings.is_empty(), "{f}: {:?}", out.warnings);
     }
 }

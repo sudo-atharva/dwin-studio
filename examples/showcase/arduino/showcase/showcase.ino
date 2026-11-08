@@ -1,12 +1,12 @@
-// DWIN Studio showcase: drives every widget in showcase.dwin.
+// UWIN Studio showcase: drives every widget in showcase.uwin.
 //
 // Wiring: display TX -> board RX1, display RX -> board TX1, GND -> GND (5 V or 3.3 V
 // TTL as your display is set). Default display baud: 115200, CRC off.
 // Board: anything with a second hardware serial (Mega, Leonardo, ESP32, STM32, RP2040).
 // On an Uno use SoftwareSerial (see below) at 115200 or lower the display baud.
 //
-// ui_gen.h comes from DWIN Studio's Build (copy the new one here after every rebuild).
-// Test without the display: DWIN Studio > Simulate > pick this board's COM port.
+// ui_gen.h comes from UWIN Studio's Build (copy the new one here after every rebuild).
+// Test without the display: UWIN Studio > Simulate > pick this board's COM port.
 
 #include "ui_gen.h"
 
@@ -229,9 +229,9 @@ void setup() {
   writeVP(VP_HEATER, 0b01);  // heater on, light off
   for (uint8_t i = 0; i < 4; i++) writeText(fileRow(i), files[i]);
   status("Ready");
-  writeText(VP_TICKER, "DWIN Studio showcase - every widget - ");
+  writeText(VP_TICKER, "UWIN Studio showcase - every widget - ");
   writeUnicode(VP_GREETING, "Привет · Γειά · Hi");
-  writeText(VP_QR, "DWIN Studio showcase");
+  writeText(VP_QR, "UWIN Studio showcase");
   drawBoxes();
 }
 

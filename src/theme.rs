@@ -136,7 +136,7 @@ fn style(s: &mut egui::Style, t: &Theme) {
     s.text_styles.insert(TextStyle::Monospace, FontId::monospace(12.5));
 }
 
-const README: &str = r#"DWIN Studio themes
+const README: &str = r#"UWIN Studio themes
 ==================
 
 Every *.json file in this folder is an editor color theme. Pick one with the

@@ -1,8 +1,8 @@
-//! Writes examples/showcase/showcase.dwin: one of every widget DWIN Studio has,
+//! Writes examples/showcase/showcase.uwin: one of every widget UWIN Studio has,
 //! over 4 screens, with comments. The Arduino sketch next to it drives all of them.
 //! cargo run --example showcase
 
-use dwin_studio::project::{button, default_widgets, Event, Page, Project, Widget, WidgetKind};
+use uwin_studio::project::{button, default_widgets, Event, Page, Project, Widget, WidgetKind};
 
 fn pal(name: &str) -> WidgetKind {
     default_widgets().into_iter().find(|(n, _)| *n == name).unwrap_or_else(|| panic!("{name}")).1
@@ -188,6 +188,6 @@ fn main() {
     pages.push(Page { name: "graphics".into(), bg, bg_image: None, swipe: (Some(2), None), widgets: ws });
 
     let p = Project { pages, ..Project::default() };
-    std::fs::write("examples/showcase/showcase.dwin", serde_json::to_string_pretty(&p).unwrap()).unwrap();
-    println!("wrote examples/showcase/showcase.dwin");
+    std::fs::write("examples/showcase/showcase.uwin", serde_json::to_string_pretty(&p).unwrap()).unwrap();
+    println!("wrote examples/showcase/showcase.uwin");
 }

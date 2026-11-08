@@ -1,4 +1,4 @@
-//! Editor project: what the user designs. Saved as JSON (`*.dwin`; older `*.dwin.json` still opens), compiled by `build`.
+//! Editor project: what the user designs. Saved as JSON (`*.uwin`; older `*.dwin.json` still opens), compiled by `build`.
 //! Image paths are relative to the project file's folder (imports go to `assets/`).
 
 use serde::{Deserialize, Serialize};

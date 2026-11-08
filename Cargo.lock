@@ -777,23 +777,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
 
 [[package]]
-name = "dwin-studio"
-version = "1.0.0"
-dependencies = [
- "ab_glyph",
- "eframe",
- "epaint_default_fonts",
- "image",
- "jpeg-encoder",
- "rfd",
- "serde",
- "serde_json",
- "serialport",
- "tiny-skia 0.12.0",
- "winresource",
-]
-
-[[package]]
 name = "ecolor"
 version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3552,6 +3535,23 @@ dependencies = [
  "js-sys",
  "serde_core",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "uwin-studio"
+version = "1.0.0"
+dependencies = [
+ "ab_glyph",
+ "eframe",
+ "epaint_default_fonts",
+ "image",
+ "jpeg-encoder",
+ "rfd",
+ "serde",
+ "serde_json",
+ "serialport",
+ "tiny-skia 0.12.0",
+ "winresource",
 ]
 
 [[package]]
