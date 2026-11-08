@@ -4,7 +4,7 @@
 //! `4F 4B`), `83` read (answered), page switch through VP 0x0084, curves through 0x0310.
 //! ponytail: no CRC mode; add when a project enables CRC in T5LCFG.
 
-use crate::build::{allocate, Alloc};
+use crate::build::{allocate, keyboard, keyboard_pos, keypad, keypad_pos, menu, Alloc, Area, Extra};
 use crate::project::{Event, Project, Widget, WidgetKind};
 use crate::render::{self, draw_state, frect, gauge_geom, line, needle_len_width, polar, rounded, text, Mode};
 use std::path::Path;
@@ -19,6 +19,19 @@ pub enum Prompt {
     Menu { vp: u16, options: Vec<String> },
 }
 
+/// Keypad / keyboard / list open on the simulated screen (DWIN copies it in from a
+/// generated page: `area` on that page, shown at `pos`).
+pub struct Popup {
+    extra: Extra,
+    area: Area,
+    pos: (i32, i32),
+    /// The field being edited (widget index on the current page).
+    field: usize,
+    prompt: Prompt,
+    pub typed: String,
+    caps: bool,
+}
+
 pub struct Sim {
     pub page: usize,
     /// 64K words of VP memory, big-endian like the screen.
@@ -31,6 +44,7 @@ pub struct Sim {
     curves: [Vec<i16>; 8],
     /// Widget index being held (slider drag, button highlight).
     pub held: Option<usize>,
+    pub popup: Option<Popup>,
     /// Where the finger went down (swipe detection).
     down_x: i32,
     start: Instant,
@@ -44,7 +58,7 @@ impl Sim {
     pub fn new(p: &Project) -> Self {
         let mut s = Sim {
             page: 0, mem: vec![0; 0x20000], allocs: allocate(p).0, out: vec![], log: vec![], rx: vec![],
-            curves: Default::default(), held: None, down_x: 0, start: Instant::now(),
+            curves: Default::default(), held: None, popup: None, down_x: 0, start: Instant::now(),
         };
         for a in s.allocs.clone() {
             if let WidgetKind::Animation { autoplay: true, .. } = p.pages[a.page].widgets[a.widget].kind {
@@ -112,7 +126,104 @@ impl Sim {
     }
 
     /// Finger down at screen pixel (x, y).
-    pub fn press(&mut self, p: &Project, x: i32, y: i32) -> Option<Prompt> {
+    pub fn press(&mut self, p: &Project, x: i32, y: i32) {
+        if self.popup.is_some() {
+            return self.press_popup(x, y);
+        }
+        if let Some(pr) = self.touch(p, x, y) {
+            self.open(p, pr);
+        }
+    }
+
+    fn open(&mut self, p: &Project, prompt: Prompt) {
+        let Some(field) = self.held.take() else { return };
+        let w = &p.pages[self.page].widgets[field];
+        let (sw, sh) = (p.width as i32, p.height as i32);
+        let ((extra, area), pos) = match (&prompt, &w.kind) {
+            (Prompt::Number { .. }, _) => {
+                let k = keypad(sw, sh);
+                let pos = keypad_pos(w, k.1, sw);
+                (k, pos)
+            }
+            (Prompt::Text { .. }, _) => {
+                let k = keyboard(sw, sh);
+                let pos = keyboard_pos(w, k.1, sh);
+                (k, pos)
+            }
+            (Prompt::Menu { options, .. }, WidgetKind::Dropdown { size, fg, bg, .. }) => {
+                let k = menu(w, options, *size, *fg, *bg, sh);
+                let pos = (k.1 .0, k.1 .1);
+                (k, pos)
+            }
+            _ => return,
+        };
+        self.popup = Some(Popup { extra, area, pos, field, prompt, typed: String::new(), caps: false });
+    }
+
+    fn press_popup(&mut self, x: i32, y: i32) {
+        let Some(pp) = &self.popup else { return };
+        // Screen position -> position on the generated page.
+        let (kx, ky) = (x - pp.pos.0 + pp.area.0, y - pp.pos.1 + pp.area.1);
+        let hit = pp.extra.page.widgets.iter().zip(&pp.extra.codes).rev().find_map(|(w, c)| {
+            let inside = kx >= w.x && ky >= w.y && kx < w.x + w.w && ky < w.y + w.h;
+            c.filter(|_| inside)
+        });
+        match hit {
+            Some(code) => self.key(code),
+            // Tapping beside a list closes it.
+            None if matches!(pp.prompt, Prompt::Menu { .. }) => self.popup = None,
+            None => {}
+        }
+    }
+
+    /// A key on the open keypad/keyboard/list: DGUS codes (0xF0 Esc, 0xF1 OK, 0xF2 backspace,
+    /// 0xF4 caps, else shifted << 8 | char; list items send their index).
+    pub fn key(&mut self, code: u16) {
+        let Some(pp) = &mut self.popup else { return };
+        match (&pp.prompt, code) {
+            (Prompt::Menu { vp, .. }, i) => {
+                let vp = *vp;
+                self.popup = None;
+                self.answer_menu(vp, i as usize);
+            }
+            (_, 0xF0) => self.popup = None,
+            (_, 0xF2) => drop(pp.typed.pop()),
+            (_, 0xF4) => pp.caps = !pp.caps,
+            (Prompt::Number { vp, dec, min, max }, 0xF1) => {
+                let (vp, dec, min, max, typed) = (*vp, *dec, *min, *max, pp.typed.clone());
+                if self.answer_number(vp, dec, min, max, &typed) {
+                    self.popup = None;
+                } else if let Some(pp) = &mut self.popup {
+                    pp.typed.clear(); // the screen rejects out-of-range input
+                }
+            }
+            (Prompt::Text { vp, len }, 0xF1) => {
+                let (vp, len, typed) = (*vp, *len, pp.typed.clone());
+                self.popup = None;
+                self.answer_text(vp, len, &typed);
+            }
+            (_, c) => {
+                let hi = (c >> 8) as u8;
+                let ch = if pp.caps && hi != 0 { hi } else { c as u8 } as char;
+                self.type_char(ch);
+            }
+        }
+    }
+
+    /// Typed on the PC keyboard (or a key on screen): numbers only take digits, '-' and '.'.
+    pub fn type_char(&mut self, ch: char) {
+        let Some(pp) = &mut self.popup else { return };
+        let ok = match pp.prompt {
+            Prompt::Number { .. } => ch.is_ascii_digit() || ch == '-' || ch == '.',
+            Prompt::Text { len, .. } => ch.is_ascii() && !ch.is_ascii_control() && pp.typed.len() < len as usize,
+            Prompt::Menu { .. } => false,
+        };
+        if ok {
+            pp.typed.push(ch);
+        }
+    }
+
+    fn touch(&mut self, p: &Project, x: i32, y: i32) -> Option<Prompt> {
         self.down_x = x;
         let ws = &p.pages[self.page].widgets;
         let wi = ws.iter().rposition(|w| Self::interactive(w) && x >= w.x && y >= w.y && x < w.x + w.w && y < w.y + w.h)?;
@@ -307,6 +418,38 @@ impl Sim {
     /// The current page as the screen would show it now.
     pub fn render(&self, p: &Project, base: &Path) -> Pixmap {
         let page = &p.pages[self.page.min(p.pages.len() - 1)];
+        let mut px = self.render_page(p, page, base);
+        if let Some(pp) = &self.popup {
+            // Field shows what is being typed, with a cursor.
+            if let Some(w) = page.widgets.get(pp.field) {
+                let color = match &w.kind {
+                    WidgetKind::Number { color, .. } | WidgetKind::Text { color, .. } => *color,
+                    _ => [255; 3],
+                };
+                if !matches!(pp.prompt, Prompt::Menu { .. }) {
+                    rounded(&mut px, frect(w), 6.0, [51, 65, 85]);
+                    text(&mut px, &format!("{}_", pp.typed), w.x as f32, w.y as f32, w.h as f32, color);
+                }
+            }
+            // Copy the keypad area from its page, like DWIN does.
+            let kb = render::render(&pp.extra.page, p.width, p.height, Mode::Normal, base);
+            let (ax, ay, aw, ah) = pp.area;
+            let (pw, ph) = (px.width() as i32, px.height() as i32);
+            for yy in 0..ah {
+                for xx in 0..aw {
+                    let (sx, sy, dx, dy) = (ax + xx, ay + yy, pp.pos.0 + xx, pp.pos.1 + yy);
+                    if sx < 0 || sy < 0 || sx >= pw || sy >= ph || dx < 0 || dy < 0 || dx >= pw || dy >= ph {
+                        continue;
+                    }
+                    let (s, d) = (4 * (sy * pw + sx) as usize, 4 * (dy * pw + dx) as usize);
+                    px.data_mut()[d..d + 4].copy_from_slice(&kb.data()[s..s + 4]);
+                }
+            }
+        }
+        px
+    }
+
+    fn render_page(&self, p: &Project, page: &crate::project::Page, base: &Path) -> Pixmap {
         let mut px = render::render(page, p.width, p.height, Mode::Base, base);
         let ms = self.start.elapsed().as_millis() as u64;
         for (wi, w) in page.widgets.iter().enumerate() {
@@ -449,9 +592,19 @@ mod tests {
         assert_eq!(s.get(0x1010), 1);
         s.press(&p, 10, 210);
         assert_eq!(s.page, 1);
-        assert_eq!(s.press(&p, 5, 5), Some(Prompt::Number { vp: 0x1020, dec: 0, min: 0, max: 999 }));
-        assert!(!s.answer_number(0x1020, 0, 0, 999, "1000"));
-        assert!(s.answer_number(0x1020, 0, 0, 999, "42"));
+        s.press(&p, 5, 5);
+        assert!(s.popup.is_some(), "keypad opens");
+        for c in "1000".chars() {
+            s.type_char(c);
+        }
+        s.key(0xF1);
+        assert!(s.popup.is_some() && s.get(0x1020) == 0, "out of range rejected, keypad stays");
+        s.key(u16::from(b'4'));
+        s.type_char('2');
+        s.key(0xF2);
+        s.key(u16::from(b'2'));
+        s.key(0xF1);
+        assert!(s.popup.is_none());
 
         // MCU: page switch split across two reads, then a read request.
         s.out.clear();

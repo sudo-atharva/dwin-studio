@@ -148,13 +148,23 @@ impl Icons {
 
 /// A screen the build adds itself: keypad, keyboard, dropdown list.
 /// `codes[i]` = key code sent by widget i (None = not a key).
-struct Extra {
-    page: Page,
-    codes: Vec<Option<u16>>,
+pub(crate) struct Extra {
+    pub(crate) page: Page,
+    pub(crate) codes: Vec<Option<u16>>,
 }
 
 /// (x, y, w, h)
-type Area = (i32, i32, i32, i32);
+pub(crate) type Area = (i32, i32, i32, i32);
+
+/// Where the keypad pops up for field `w`: the half of the screen away from it.
+pub(crate) fn keypad_pos(w: &Widget, (_, ky, kw, _): Area, sw: i32) -> (i32, i32) {
+    ((if w.x + w.w / 2 < sw / 2 { sw - kw - 8 } else { 8 }).max(0), ky)
+}
+
+/// Where the keyboard pops up for field `w`: bottom, or top when the field is low.
+pub(crate) fn keyboard_pos(w: &Widget, (kx, ky, _, _): Area, sh: i32) -> (i32, i32) {
+    (kx, if w.y + w.h / 2 > sh / 2 { 8 } else { ky })
+}
 
 fn key_button(label: &str, (x, y, w, h): Area, size: f32, bg: Rgb) -> Widget {
     let mut k = button(label, Event::None);
@@ -195,7 +205,7 @@ const BACK: u16 = 0xF2;
 const CAPS: u16 = 0xF4;
 
 /// Numeric keypad, centred on its page. Returns the page and the keypad area on it.
-fn keypad(sw: i32, sh: i32) -> (Extra, Area) {
+pub(crate) fn keypad(sw: i32, sh: i32) -> (Extra, Area) {
     let g = 8;
     let kh = ((sh * 2 / 3 - 5 * g) / 4).max(16);
     let (w, h) = (4 * (kh * 6 / 5) + 5 * g, 4 * kh + 5 * g);
@@ -211,7 +221,7 @@ fn keypad(sw: i32, sh: i32) -> (Extra, Area) {
 }
 
 /// QWERTY keyboard across the bottom of its page.
-fn keyboard(sw: i32, sh: i32) -> (Extra, Area) {
+pub(crate) fn keyboard(sw: i32, sh: i32) -> (Extra, Area) {
     let g = 6;
     let kw = (sw - 13 * g) / 10;
     let kh = kw.min((sh * 3 / 5 - 6 * g) / 5).max(16);
@@ -232,7 +242,7 @@ fn keyboard(sw: i32, sh: i32) -> (Extra, Area) {
 }
 
 /// Dropdown list drawn where it pops up: under the box, or above when there is no room.
-fn menu(w: &Widget, options: &[String], size: f32, fg: Rgb, bg: Rgb, sh: i32) -> (Extra, Area) {
+pub(crate) fn menu(w: &Widget, options: &[String], size: f32, fg: Rgb, bg: Rgb, sh: i32) -> (Extra, Area) {
     let h = w.h * options.len().max(1) as i32;
     let y = if w.y + w.h + h <= sh { w.y + w.h } else { (w.y - h).max(0) };
     let mut page = Page { name: format!("_list_{}", w.name), bg: [0; 3], bg_image: None, swipe: (None, None), widgets: vec![] };
@@ -367,14 +377,13 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                         shows.push(show_record(kind(SHOW_KINDS, "number"), &params));
                     }
                     if let (Some((min, max)), Some((kp, (kx, ky, kw, kh)))) = (input, kpad) {
-                        // Keypad pops up on the half of the screen away from the field.
-                        let pos_x = if w.x + w.w / 2 < sw / 2 { sw - kw - 8 } else { 8 };
+                        let (pos_x, pos_y) = keypad_pos(w, (kx, ky, kw, kh), sw);
                         let params: Params = vec![
                             ("vp", vp()), ("int_digits", n(*int_digits as u32)), ("dec_digits", n(*dec_digits as u32)),
                             ("show_x", n(x0)), ("show_y", n(y0)), ("color", n(rgb565(*color))), ("font", n(font)),
                             ("cursor_color", n(cursor(*color))), ("kb_source", n(1)), ("kb_page", n(kp as u32)),
                             ("kb_x0", n(kx as u32)), ("kb_y0", n(ky as u32)), ("kb_x1", n((kx + kw - 1) as u32)),
-                            ("kb_y1", n((ky + kh - 1) as u32)), ("kb_pos_x", n(pos_x.max(0) as u32)), ("kb_pos_y", n(ky as u32)),
+                            ("kb_y1", n((ky + kh - 1) as u32)), ("kb_pos_x", n(pos_x as u32)), ("kb_pos_y", n(pos_y as u32)),
                             ("limits_en", n(1)), ("min", n(*min as u32)), ("max", n(*max as u32)),
                         ];
                         rec.set_params(kind(TOUCH_KINDS, "var_input"), &params);
@@ -400,15 +409,14 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                         shows.push(show_record(kind(SHOW_KINDS, "text"), &params));
                     }
                     if let (true, Some((kp, (kx, ky, kw, kh)))) = (*input, kbd) {
-                        // Keyboard sits at the bottom unless the field is there; then at the top.
-                        let pos_y = if w.y + w.h / 2 > sh / 2 { 8 } else { ky };
+                        let (pos_x, pos_y) = keyboard_pos(w, (kx, ky, kw, kh), sh);
                         let params: Params = vec![
                             ("vp", vp()), ("max_len", n((*len).min(255) as u32)), ("font_x", n(size)), ("font_y", n(size)),
                             ("cursor_color", n(cursor(*color))), ("color", n(rgb565(*color))),
                             ("scan_x0", n(x0)), ("scan_y0", n(y0)), ("scan_x1", n(x1)), ("scan_y1", n(y1)),
                             ("kb_source", n(1)), ("kb_page", n(kp as u32)), ("kb_x0", n(kx as u32)), ("kb_y0", n(ky as u32)),
                             ("kb_x1", n((kx + kw - 1) as u32)), ("kb_y1", n((ky + kh - 1) as u32)),
-                            ("kb_pos_x", n(kx as u32)), ("kb_pos_y", n(pos_y as u32)),
+                            ("kb_pos_x", n(pos_x as u32)), ("kb_pos_y", n(pos_y as u32)),
                         ];
                         rec.set_params(kind(TOUCH_KINDS, "text_input"), &params);
                         touch.push(rec);

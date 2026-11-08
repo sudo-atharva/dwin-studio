@@ -6,7 +6,7 @@
 use dwin_studio::build::{allocate, build, Alloc, Output};
 use dwin_studio::project::{default_widgets, Event, Page, Project, Widget, WidgetKind, PRESETS};
 use dwin_studio::render::{load_image, render, Mode};
-use dwin_studio::sim::{Prompt, Sim};
+use dwin_studio::sim::Sim;
 use std::io::{Read, Write};
 use std::sync::mpsc;
 use std::time::Duration;
@@ -120,8 +120,6 @@ struct App {
     title: String,
     /// Some = Simulate mode (EEZ "Run"): the page behaves like the screen.
     sim: Option<Sim>,
-    /// Keypad/keyboard/list the simulated screen is asking for, with typed text.
-    prompt: Option<(Prompt, String)>,
     port: Option<Box<dyn serialport::SerialPort>>,
     port_rx: Option<mpsc::Receiver<Vec<u8>>>,
     ports: Vec<String>,
@@ -152,7 +150,6 @@ impl App {
             status: "New project - save it to start importing images".into(),
             title: String::new(),
             sim: None,
-            prompt: None,
             port: None,
             port_rx: None,
             ports: vec![],
@@ -501,7 +498,6 @@ impl App {
         if let Some(s) = self.sim.take() {
             self.page = s.page.min(self.project.pages.len() - 1);
         }
-        self.prompt = None;
     }
 
     fn refresh_ports(&mut self) {
@@ -579,12 +575,22 @@ impl App {
         let (down, up, pos) = ui.input(|i| (i.pointer.primary_pressed(), i.pointer.primary_released(), i.pointer.interact_pos()));
         if let Some(p) = pos {
             let q = to_proj(p);
-            if down && resp.hovered() && self.prompt.is_none() {
-                if let Some(pr) = sim.press(&self.project, q.x as i32, q.y as i32) {
-                    self.prompt = Some((pr, String::new()));
-                }
+            if down && resp.hovered() {
+                sim.press(&self.project, q.x as i32, q.y as i32);
             } else if resp.dragged() {
                 sim.drag(&self.project, q.x as i32, q.y as i32);
+            }
+        }
+        // PC keyboard types into the on-screen keypad/keyboard.
+        if sim.popup.is_some() {
+            for e in ui.input(|i| i.events.clone()) {
+                match e {
+                    egui::Event::Text(t) => t.chars().for_each(|c| sim.type_char(c)),
+                    egui::Event::Key { key: Key::Enter, pressed: true, .. } => sim.key(0xF1),
+                    egui::Event::Key { key: Key::Backspace, pressed: true, .. } => sim.key(0xF2),
+                    egui::Event::Key { key: Key::Escape, pressed: true, .. } => sim.key(0xF0),
+                    _ => {}
+                }
             }
         }
         if up {
@@ -708,55 +714,6 @@ impl App {
         });
         ui.add_space(6.0);
         ui.label(RichText::new("Chart samples: MCU writes 0x0310. Clock shows PC time (UTC).").weak().small());
-    }
-
-    /// The simulated screen's keypad / keyboard / list.
-    fn prompt_window(&mut self, ctx: &egui::Context) {
-        let (Some((pr, typed)), Some(sim)) = (&mut self.prompt, &mut self.sim) else { return };
-        let mut close = false;
-        let win = egui::Window::new("Screen input").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]);
-        win.show(ctx, |ui| {
-            let enter = ui.input(|i| i.key_pressed(Key::Enter));
-            match pr.clone() {
-                Prompt::Number { vp, dec, min, max } => {
-                    let k = 10f64.powi(dec as i32);
-                    ui.label(format!("Number {:.*} .. {:.*}", dec as usize, min as f64 / k, dec as usize, max as f64 / k));
-                    ui.text_edit_singleline(typed).request_focus();
-                    ui.horizontal(|ui| {
-                        if ui.button("OK").clicked() || enter {
-                            if sim.answer_number(vp, dec, min, max, typed) {
-                                close = true;
-                            } else {
-                                typed.clear(); // the screen rejects out-of-range input
-                            }
-                        }
-                        close |= ui.button("Esc").clicked();
-                    });
-                }
-                Prompt::Text { vp, len } => {
-                    ui.label(format!("Text, up to {len} characters"));
-                    ui.text_edit_singleline(typed).request_focus();
-                    ui.horizontal(|ui| {
-                        if ui.button("OK").clicked() || enter {
-                            sim.answer_text(vp, len, typed);
-                            close = true;
-                        }
-                        close |= ui.button("Esc").clicked();
-                    });
-                }
-                Prompt::Menu { vp, options } => {
-                    for (i, o) in options.iter().enumerate() {
-                        if ui.add_sized([180.0, 28.0], egui::Button::new(o)).clicked() {
-                            sim.answer_menu(vp, i);
-                            close = true;
-                        }
-                    }
-                }
-            }
-        });
-        if close || ctx.input(|i| i.key_pressed(Key::Escape)) {
-            self.prompt = None;
-        }
     }
 
     fn left_panel(&mut self, ui: &mut egui::Ui) {
@@ -1579,7 +1536,6 @@ impl eframe::App for App {
             });
             egui::Panel::bottom("simlog").resizable(true).default_size(180.0).show(ui, |ui| self.sim_panel(ui));
             egui::CentralPanel::no_frame().show(ui, |ui| self.sim_canvas(ui));
-            self.prompt_window(&ui.ctx().clone());
             self.pump();
             return;
         }
