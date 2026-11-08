@@ -529,6 +529,13 @@ impl App {
                     WidgetKind::Toggle { .. } => "◑",
                     WidgetKind::Slider { .. } => "━",
                     WidgetKind::Icons { .. } => "◈",
+                    WidgetKind::Dropdown { .. } => "▾",
+                    WidgetKind::Clock { .. } => "🕓",
+                    WidgetKind::Qr { .. } => "▦",
+                    WidgetKind::Progress { .. } => "▬",
+                    WidgetKind::Chart { .. } => "📈",
+                    WidgetKind::Gauge { .. } => "◔",
+                    WidgetKind::Animation { .. } => "🎞",
                 };
                 let r = ui.selectable_label(self.selected.contains(&i), format!("{icon} {}", w.name));
                 let r = if w.comment.is_empty() { r } else { r.on_hover_text(&w.comment) };
@@ -652,7 +659,7 @@ impl App {
         let page = self.page;
         let alloc = allocs.iter().find(|a| a.page == page && a.widget == s).cloned();
         // Things +/- buttons can point at: anything with a value.
-        let targets: Vec<String> = allocs.iter().filter(|a| a.what != "button" && a.what != "text").map(|a| a.name.clone()).collect();
+        let targets: Vec<String> = allocs.iter().filter(|a| !["button", "text", "qr"].contains(&a.what)).map(|a| a.name.clone()).collect();
         let w = &mut self.project.pages[page].widgets[s];
 
         CollapsingHeader::new(w.kind_name().to_uppercase()).default_open(true).show(ui, |ui| {
@@ -712,20 +719,87 @@ impl App {
                         radius_row(ui, radius);
                     }
                 }
-                WidgetKind::Number { int_digits, dec_digits, color, .. } => {
+                WidgetKind::Number { int_digits, dec_digits, color, input, .. } => {
                     drag_row(ui, "Integer digits", int_digits, 1..=10);
                     drag_row(ui, "Decimals", dec_digits, 0..=5);
                     color_row(ui, "Color", color);
                     ui.label("Font size");
                     ui.label("= height (H)");
                     ui.end_row();
+                    ui.label("Tap to edit");
+                    let mut on = input.is_some();
+                    if ui.checkbox(&mut on, "keypad").changed() {
+                        *input = on.then(|| (0, 10i32.pow(*int_digits as u32) - 1));
+                    }
+                    ui.end_row();
+                    if let Some((lo, hi)) = input {
+                        drag_row(ui, "Min", lo, -32768..=32767);
+                        drag_row(ui, "Max", hi, -32768..=32767);
+                    }
                 }
-                WidgetKind::Text { len, color, .. } => {
+                WidgetKind::Text { len, color, input, .. } => {
                     drag_row(ui, "Max bytes", len, 1..=255);
                     color_row(ui, "Color", color);
                     ui.label("Font size");
                     ui.label("= height (H)");
                     ui.end_row();
+                    ui.label("Tap to edit");
+                    ui.checkbox(input, "keyboard");
+                    ui.end_row();
+                }
+                WidgetKind::Dropdown { options, size, fg, bg, .. } => {
+                    ui.label("Options\n(one per line)");
+                    let mut s = options.join("\n");
+                    if ui.add(egui::TextEdit::multiline(&mut s).desired_rows(4)).changed() {
+                        *options = s.lines().map(str::to_string).collect();
+                    }
+                    ui.end_row();
+                    size_row(ui, size);
+                    color_row(ui, "Text color", fg);
+                    color_row(ui, "Fill", bg);
+                }
+                WidgetKind::Clock { format, color } => {
+                    text_row(ui, "Format", format);
+                    ui.label("");
+                    ui.label(RichText::new("Y year · M month · D day\nH hour · Q minute · S second · W weekday").small().weak());
+                    ui.end_row();
+                    color_row(ui, "Color", color);
+                }
+                WidgetKind::Qr { len, dot, .. } => {
+                    drag_row(ui, "Max bytes", len, 1..=458);
+                    drag_row(ui, "Pixels per dot", dot, 1..=16);
+                }
+                WidgetKind::Progress { min, max, fg, bg, border, vertical, .. } => {
+                    drag_row(ui, "Min", min, 0..=65535);
+                    drag_row(ui, "Max", max, 0..=65535);
+                    color_row(ui, "Bar", fg);
+                    color_row(ui, "Background", bg);
+                    color_row(ui, "Border", border);
+                    ui.label("Direction");
+                    ui.checkbox(vertical, "vertical");
+                    ui.end_row();
+                }
+                WidgetKind::Chart { channel, min, max, step, color, bg } => {
+                    drag_row(ui, "Channel", channel, 0..=7);
+                    drag_row(ui, "Min", min, -32768..=32767);
+                    drag_row(ui, "Max", max, -32768..=32767);
+                    drag_row(ui, "Pixels per sample", step, 1..=50);
+                    color_row(ui, "Line", color);
+                    color_row(ui, "Background", bg);
+                }
+                WidgetKind::Gauge { min, max, sweep, needle, dial, .. } => {
+                    drag_row(ui, "Min", min, 0..=65535);
+                    drag_row(ui, "Max", max, 0..=65535);
+                    drag_row(ui, "Sweep (°)", sweep, 30..=355);
+                    color_row(ui, "Needle", needle);
+                    color_row(ui, "Dial", dial);
+                }
+                WidgetKind::Animation { images, period_ms, autoplay, .. } => {
+                    drag_row(ui, "Frame time (ms)", period_ms, 8..=2000);
+                    ui.label("Start");
+                    ui.checkbox(autoplay, "playing at boot");
+                    ui.end_row();
+                    image_list(ui, images, &assets);
                 }
                 WidgetKind::Toggle { on, off, knob, .. } => {
                     color_row(ui, "On", on);
@@ -744,34 +818,7 @@ impl App {
                 WidgetKind::Icons { images, .. } => {
                     ui.label("Value → picture");
                     ui.end_row();
-                    let mut remove = None;
-                    let mut up = None;
-                    for (i, p) in images.iter().enumerate() {
-                        ui.monospace(format!("{i}"));
-                        ui.horizontal(|ui| {
-                            ui.label(p.trim_start_matches("assets/"));
-                            if i > 0 && ui.small_button("⬆").clicked() {
-                                up = Some(i);
-                            }
-                            if ui.small_button("✕").clicked() {
-                                remove = Some(i);
-                            }
-                        });
-                        ui.end_row();
-                    }
-                    if let Some(i) = remove {
-                        images.remove(i);
-                    }
-                    if let Some(i) = up {
-                        images.swap(i, i - 1);
-                    }
-                    ui.label("");
-                    let mut add = None;
-                    asset_pick(ui, "addicon", &mut add, &assets);
-                    if let Some(a) = add {
-                        images.push(a);
-                    }
-                    ui.end_row();
+                    image_list(ui, images, &assets);
                 }
             });
         });
@@ -911,7 +958,7 @@ impl App {
         let snap = move |v: f32| (v / grid as f32).round() as i32 * grid;
 
         for w in self.widgets() {
-            if matches!(w.kind, WidgetKind::Number { .. } | WidgetKind::Text { .. }) {
+            if matches!(w.kind, WidgetKind::Number { .. } | WidgetKind::Text { .. } | WidgetKind::Clock { .. } | WidgetKind::Qr { .. }) {
                 painter.rect_stroke(wrect(w), 0.0, Stroke::new(1.0, Color32::from_gray(110)), StrokeKind::Inside);
             }
         }
@@ -1082,6 +1129,38 @@ fn asset_pick(ui: &mut egui::Ui, id: &str, v: &mut Option<String>, assets: &[Str
             ui.label("Import images in ASSETS first");
         }
     });
+}
+
+/// Ordered picture list (grid rows): index, name, move up, remove, then an add picker.
+fn image_list(ui: &mut egui::Ui, images: &mut Vec<String>, assets: &[String]) {
+    let mut remove = None;
+    let mut up = None;
+    for (i, p) in images.iter().enumerate() {
+        ui.monospace(format!("{i}"));
+        ui.horizontal(|ui| {
+            ui.label(p.trim_start_matches("assets/"));
+            if i > 0 && ui.small_button("⬆").clicked() {
+                up = Some(i);
+            }
+            if ui.small_button("✕").clicked() {
+                remove = Some(i);
+            }
+        });
+        ui.end_row();
+    }
+    if let Some(i) = remove {
+        images.remove(i);
+    }
+    if let Some(i) = up {
+        images.swap(i, i - 1);
+    }
+    ui.label("");
+    let mut add = None;
+    asset_pick(ui, "addicon", &mut add, assets);
+    if let Some(a) = add {
+        images.push(a);
+    }
+    ui.end_row();
 }
 
 /// Auto shows the address the build will use; switching to manual starts from it.

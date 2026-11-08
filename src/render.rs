@@ -6,7 +6,7 @@ use image::RgbaImage;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
-use tiny_skia::{Color, FillRule, Paint, PathBuilder, Pixmap, Rect, Transform};
+use tiny_skia::{Color, FillRule, LineCap, Paint, PathBuilder, Pixmap, Rect, Stroke, Transform};
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Mode {
@@ -124,6 +124,44 @@ fn picture(px: &mut Pixmap, img: &RgbaImage, (x, y, w, h): (i32, i32, i32, i32),
     }
 }
 
+/// Polyline with round caps.
+fn line(px: &mut Pixmap, pts: &[(f32, f32)], width: f32, c: Rgb) {
+    let mut pb = PathBuilder::new();
+    for (i, &(x, y)) in pts.iter().enumerate() {
+        if i == 0 { pb.move_to(x, y) } else { pb.line_to(x, y) }
+    }
+    let Some(path) = pb.finish() else { return };
+    let stroke = Stroke { width, line_cap: LineCap::Round, ..Stroke::default() };
+    px.stroke_path(&path, &paint(c), &stroke, Transform::identity(), None);
+}
+
+/// Point at `deg` clockwise from 12 o'clock (DGUS rotation convention).
+fn polar(cx: f32, cy: f32, r: f32, deg: f32) -> (f32, f32) {
+    let a = deg.to_radians();
+    (cx + r * a.sin(), cy - r * a.cos())
+}
+
+/// Gauge centre, radius, start angle (deg). The sweep is centred on 6 o'clock's gap.
+pub fn gauge_geom(w: &Widget, sweep: u16) -> (f32, f32, f32, f32) {
+    let r = w.w.min(w.h) as f32 / 2.0;
+    (w.x as f32 + w.w as f32 / 2.0, w.y as f32 + w.h as f32 / 2.0, r, 360.0 - sweep as f32 / 2.0)
+}
+
+pub fn needle_len_width(r: f32) -> (f32, f32) {
+    (r * 0.8, (r / 16.0).max(3.0))
+}
+
+/// Needle on black, pointing up, pivot at (width/2, len): the icon the screen rotates.
+pub fn needle_icon(r: f32, c: Rgb) -> (Pixmap, u32, u32) {
+    let (len, nw) = needle_len_width(r);
+    let (iw, ih) = ((nw + 4.0).ceil() as u32, (len + nw + 2.0).ceil() as u32);
+    let mut px = Pixmap::new(iw, ih).unwrap();
+    px.fill(Color::BLACK);
+    let cx = iw as f32 / 2.0;
+    line(&mut px, &[(cx, len), (cx, nw / 2.0 + 1.0)], nw, c);
+    (px, iw / 2, len as u32)
+}
+
 fn missing(px: &mut Pixmap, w: &Widget) {
     rounded(px, frect(w), 0.0, [90, 30, 30]);
     centered(px, frect(w), "?", (w.h as f32 * 0.6).max(8.0), [255, 200, 200]);
@@ -143,7 +181,11 @@ pub fn draw_state(px: &mut Pixmap, w: &Widget, state: usize, base: &Path) {
             let d = w.h as f32;
             rounded(px, (w.x as f32, w.y as f32, d, d), d / 2.0, *knob);
         }
-        WidgetKind::Icons { images, .. } => match images.get(state).and_then(|p| load_image(base, p)) {
+        WidgetKind::Dropdown { options, size, fg, .. } => {
+            let t = options.get(state).map_or("", |s| s.as_str());
+            text(px, t, w.x as f32 + 12.0, w.y as f32 + (w.h as f32 - size) / 2.0, *size, *fg);
+        }
+        WidgetKind::Icons { images, .. } | WidgetKind::Animation { images, .. } => match images.get(state).and_then(|p| load_image(base, p)) {
             Some(img) => picture(px, &img, w.rect(), 1.0),
             None => missing(px, w),
         },
@@ -184,15 +226,96 @@ pub fn render(page: &Page, width: u16, height: u16, mode: Mode, base: &Path) -> 
                     draw_state(&mut px, w, 0, base);
                 }
             }
-            WidgetKind::Toggle { .. } | WidgetKind::Icons { .. } if dynamic => draw_state(&mut px, w, 0, base),
-            WidgetKind::Number { int_digits, dec_digits, color, .. } if mode == Mode::Preview => {
+            WidgetKind::Dropdown { bg, fg, .. } => {
+                let (x, y, ww, hh) = frect(w);
+                rounded(&mut px, (x, y, ww, hh), 8.0, *bg);
+                // Caret: small down triangle at the right.
+                let (tx, ty, s) = (x + ww - hh * 0.55, y + hh / 2.0, hh * 0.15);
+                let mut pb = PathBuilder::new();
+                pb.move_to(tx - s, ty - s / 2.0);
+                pb.line_to(tx + s, ty - s / 2.0);
+                pb.line_to(tx, ty + s);
+                pb.close();
+                px.fill_path(&pb.finish().unwrap(), &paint(*fg), FillRule::Winding, Transform::identity(), None);
+                if dynamic {
+                    draw_state(&mut px, w, 0, base);
+                }
+            }
+            WidgetKind::Chart { step, color, bg, .. } => {
+                rounded(&mut px, frect(w), 0.0, *bg);
+                if mode == Mode::Preview {
+                    let (x, y, ww, hh) = frect(w);
+                    let pts: Vec<_> = (0..=(ww as i32 / (*step).max(1) as i32))
+                        .map(|i| {
+                            let px_x = x + i as f32 * (*step).max(1) as f32;
+                            let v = (px_x / 30.0).sin() * 0.4 + 0.5; // fake samples
+                            (px_x, y + hh * (1.0 - v))
+                        })
+                        .collect();
+                    line(&mut px, &pts, 2.0, *color);
+                }
+            }
+            WidgetKind::Gauge { sweep, needle, dial, .. } => {
+                let (cx, cy, r, start) = gauge_geom(w, *sweep);
+                let arc: Vec<_> = (0..=64).map(|i| polar(cx, cy, r - 4.0, start + *sweep as f32 * i as f32 / 64.0)).collect();
+                line(&mut px, &arc, 4.0, *dial);
+                for i in 0..=10 {
+                    let a = start + *sweep as f32 * i as f32 / 10.0;
+                    line(&mut px, &[polar(cx, cy, r * 0.82, a), polar(cx, cy, r - 6.0, a)], 2.0, *dial);
+                }
+                if mode == Mode::Preview {
+                    let (len, nw) = needle_len_width(r);
+                    line(&mut px, &[(cx, cy), polar(cx, cy, len, start)], nw, *needle);
+                }
+            }
+            WidgetKind::Clock { format, color } if mode == Mode::Preview => {
+                let s: String = format
+                    .chars()
+                    .map(|c| match c {
+                        'Y' => "2026".into(), 'M' => "11".into(), 'D' => "08".into(), 'H' => "12".into(),
+                        'Q' => "34".into(), 'S' => "56".into(), 'W' => "SUN".into(), c => c.to_string(),
+                    })
+                    .collect();
+                text(&mut px, &s, w.x as f32, w.y as f32, w.h as f32, *color);
+            }
+            WidgetKind::Qr { .. } if mode == Mode::Preview => {
+                rounded(&mut px, frect(w), 0.0, [255; 3]);
+                let cell = (w.w.min(w.h) / 9).max(1);
+                for i in 0..81 {
+                    if (i * 7 + i / 9) % 3 == 0 {
+                        let (cx, cy) = (w.x + (i % 9) * cell, w.y + (i / 9) * cell);
+                        rounded(&mut px, (cx as f32, cy as f32, cell as f32, cell as f32), 0.0, [0; 3]);
+                    }
+                }
+            }
+            WidgetKind::Progress { fg, bg, border, vertical, .. } if mode == Mode::Preview => {
+                let (x, y, ww, hh) = frect(w);
+                rounded(&mut px, (x, y, ww, hh), 0.0, *border);
+                rounded(&mut px, (x + 1.0, y + 1.0, ww - 2.0, hh - 2.0), 0.0, *bg);
+                let r = if *vertical { (x + 1.0, y + hh * 0.6, ww - 2.0, hh * 0.4 - 1.0) } else { (x + 1.0, y + 1.0, ww * 0.4, hh - 2.0) };
+                rounded(&mut px, r, 0.0, *fg);
+            }
+            WidgetKind::Toggle { .. } | WidgetKind::Icons { .. } | WidgetKind::Animation { .. } if dynamic => {
+                draw_state(&mut px, w, 0, base)
+            }
+            // Editable fields get a box so the operator sees where to tap.
+            WidgetKind::Number { input: Some(_), .. } | WidgetKind::Text { input: true, .. } if mode != Mode::Preview => {
+                rounded(&mut px, frect(w), 6.0, [30, 41, 59]);
+            }
+            WidgetKind::Number { int_digits, dec_digits, color, input, .. } if mode == Mode::Preview => {
+                if input.is_some() {
+                    rounded(&mut px, frect(w), 6.0, [30, 41, 59]);
+                }
                 let mut s = "8".repeat(*int_digits as usize);
                 if *dec_digits > 0 {
                     s += &format!(".{}", "8".repeat(*dec_digits as usize));
                 }
                 text(&mut px, &s, w.x as f32, w.y as f32, w.h as f32, *color);
             }
-            WidgetKind::Text { color, .. } if mode == Mode::Preview => {
+            WidgetKind::Text { color, input, .. } if mode == Mode::Preview => {
+                if *input {
+                    rounded(&mut px, frect(w), 6.0, [30, 41, 59]);
+                }
                 text(&mut px, &w.name, w.x as f32, w.y as f32, w.h as f32, *color)
             }
             _ => {}

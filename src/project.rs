@@ -65,15 +65,43 @@ pub enum WidgetKind {
         event: Event,
     },
     /// Number shown by the screen from a VP (int16, fixed-point by `dec_digits`).
-    Number { vp: Option<u16>, int_digits: u8, dec_digits: u8, color: Rgb },
-    /// Text shown by the screen from a VP (ASCII, `len` bytes).
-    Text { vp: Option<u16>, len: u16, color: Rgb },
+    /// `input` = Some((min, max)): tapping opens a generated keypad.
+    Number {
+        vp: Option<u16>,
+        int_digits: u8,
+        dec_digits: u8,
+        color: Rgb,
+        #[serde(default)]
+        input: Option<(i32, i32)>,
+    },
+    /// Text shown by the screen from a VP (ASCII, `len` bytes). `input`: tap opens a keyboard.
+    Text {
+        vp: Option<u16>,
+        len: u16,
+        color: Rgb,
+        #[serde(default)]
+        input: bool,
+    },
     /// On/off switch. Tapping flips VP between 0 and 1.
     Toggle { vp: Option<u16>, on: Rgb, off: Rgb, knob: Rgb },
     /// Horizontal slider. Dragging writes min..max to VP; MCU writes move the knob.
     Slider { vp: Option<u16>, min: u16, max: u16, track: Rgb, knob: Rgb },
     /// Shows `images[v]` for VP value v (status lights, battery, modes...).
     Icons { vp: Option<u16>, images: Vec<String> },
+    /// Tap opens a list; picking item i writes i to VP and shows it in the box.
+    Dropdown { vp: Option<u16>, options: Vec<String>, size: f32, fg: Rgb, bg: Rgb },
+    /// Screen's real-time clock. `format`: Y M D H Q(minute) S W(weekday), other chars as-is.
+    Clock { format: String, color: Rgb },
+    /// QR code of the text at VP (end it with 0xFFFF). `dot` = pixels per module.
+    Qr { vp: Option<u16>, len: u16, dot: u8 },
+    /// Bar filled from VP between min and max, drawn by the screen.
+    Progress { vp: Option<u16>, min: u16, max: u16, fg: Rgb, bg: Rgb, border: Rgb, vertical: bool },
+    /// Live curve; MCU pushes samples to `channel` (0..7) through VP 0x0310.
+    Chart { channel: u8, min: i16, max: i16, step: u8, color: Rgb, bg: Rgb },
+    /// Dial with a needle rotated by VP between min and max over `sweep` degrees.
+    Gauge { vp: Option<u16>, min: u16, max: u16, sweep: u16, needle: Rgb, dial: Rgb },
+    /// Frames played in a loop while VP = 1 (stops on 0). `autoplay` sets VP = 1 at boot.
+    Animation { vp: Option<u16>, images: Vec<String>, period_ms: u16, autoplay: bool },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -94,7 +122,12 @@ impl WidgetKind {
             | WidgetKind::Text { vp, .. }
             | WidgetKind::Toggle { vp, .. }
             | WidgetKind::Slider { vp, .. }
-            | WidgetKind::Icons { vp, .. } => Some(vp),
+            | WidgetKind::Icons { vp, .. }
+            | WidgetKind::Dropdown { vp, .. }
+            | WidgetKind::Qr { vp, .. }
+            | WidgetKind::Progress { vp, .. }
+            | WidgetKind::Gauge { vp, .. }
+            | WidgetKind::Animation { vp, .. } => Some(vp),
             _ => None,
         }
     }
@@ -116,6 +149,13 @@ impl Widget {
             WidgetKind::Toggle { .. } => (80, 40),
             WidgetKind::Slider { .. } => (300, 40),
             WidgetKind::Icons { .. } => (64, 64),
+            WidgetKind::Dropdown { .. } => (200, 44),
+            WidgetKind::Clock { .. } => (320, 32),
+            WidgetKind::Qr { .. } => (120, 120),
+            WidgetKind::Progress { .. } => (300, 24),
+            WidgetKind::Chart { .. } => (360, 180),
+            WidgetKind::Gauge { .. } => (200, 200),
+            WidgetKind::Animation { .. } => (64, 64),
         };
         Self { name: name.into(), x, y, w, h, comment: String::new(), kind }
     }
@@ -131,6 +171,13 @@ impl Widget {
             WidgetKind::Toggle { .. } => "Toggle",
             WidgetKind::Slider { .. } => "Slider",
             WidgetKind::Icons { .. } => "Icons",
+            WidgetKind::Dropdown { .. } => "Dropdown",
+            WidgetKind::Clock { .. } => "Clock",
+            WidgetKind::Qr { .. } => "QR Code",
+            WidgetKind::Progress { .. } => "Progress",
+            WidgetKind::Chart { .. } => "Chart",
+            WidgetKind::Gauge { .. } => "Gauge",
+            WidgetKind::Animation { .. } => "Animation",
         }
     }
 
@@ -153,11 +200,25 @@ pub fn default_widgets() -> Vec<(&'static str, WidgetKind)> {
         ("+ / − Button", button("+", Event::Adjust { target: String::new(), step: 1, min: 0, max: 100, wrap: false, repeat: true })),
         ("Label", WidgetKind::Label { text: "Label".into(), size: 24.0, color: [255; 3] }),
         ("Panel", WidgetKind::Panel { color: [30, 41, 59], radius: 12.0 }),
-        ("Number", WidgetKind::Number { vp: None, int_digits: 3, dec_digits: 1, color: [255; 3] }),
-        ("Text", WidgetKind::Text { vp: None, len: 20, color: [255; 3] }),
+        ("Number", WidgetKind::Number { vp: None, int_digits: 3, dec_digits: 1, color: [255; 3], input: None }),
+        ("Number Input", WidgetKind::Number { vp: None, int_digits: 3, dec_digits: 0, color: [255; 3], input: Some((0, 999)) }),
+        ("Text", WidgetKind::Text { vp: None, len: 20, color: [255; 3], input: false }),
+        ("Text Input", WidgetKind::Text { vp: None, len: 20, color: [255; 3], input: true }),
         ("Toggle", WidgetKind::Toggle { vp: None, on: [34, 197, 94], off: [71, 85, 105], knob: [255; 3] }),
         ("Slider", WidgetKind::Slider { vp: None, min: 0, max: 100, track: [71, 85, 105], knob: [255; 3] }),
         ("Icons", WidgetKind::Icons { vp: None, images: vec![] }),
+        ("Dropdown", WidgetKind::Dropdown {
+            vp: None, options: vec!["Option A".into(), "Option B".into(), "Option C".into()],
+            size: 22.0, fg: [255; 3], bg: [51, 65, 85],
+        }),
+        ("Progress", WidgetKind::Progress {
+            vp: None, min: 0, max: 100, fg: [34, 197, 94], bg: [51, 65, 85], border: [148, 163, 184], vertical: false,
+        }),
+        ("Gauge", WidgetKind::Gauge { vp: None, min: 0, max: 100, sweep: 270, needle: [239, 68, 68], dial: [148, 163, 184] }),
+        ("Chart", WidgetKind::Chart { channel: 0, min: 0, max: 100, step: 2, color: [56, 189, 248], bg: [2, 6, 23] }),
+        ("Clock", WidgetKind::Clock { format: "Y-M-D H:Q:S".into(), color: [255; 3] }),
+        ("QR Code", WidgetKind::Qr { vp: None, len: 64, dot: 4 }),
+        ("Animation", WidgetKind::Animation { vp: None, images: vec![], period_ms: 200, autoplay: true }),
     ]
 }
 

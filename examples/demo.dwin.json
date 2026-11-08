@@ -53,9 +53,43 @@
       "widgets": [
         { "name": "settings_title", "x": 24, "y": 20, "w": 400, "h": 40,
           "kind": { "Label": { "text": "Settings", "size": 34.0, "color": [255, 255, 255] } } },
+        { "name": "clock", "comment": "Screen RTC", "x": 500, "y": 28, "w": 280, "h": 28,
+          "kind": { "Clock": { "format": "Y-M-D H:Q", "color": [148, 163, 184] } } },
+        { "name": "setpoint_label", "x": 24, "y": 100, "w": 200, "h": 28,
+          "kind": { "Label": { "text": "Temp setpoint", "size": 22.0, "color": [148, 163, 184] } } },
+        { "name": "setpoint", "comment": "Target torch temperature, operator types it", "x": 260, "y": 92, "w": 160, "h": 44,
+          "kind": { "Number": { "vp": null, "int_digits": 3, "dec_digits": 0, "color": [255, 255, 255], "input": [0, 450] } } },
+        { "name": "job_label", "x": 24, "y": 164, "w": 200, "h": 28,
+          "kind": { "Label": { "text": "Job name", "size": 22.0, "color": [148, 163, 184] } } },
+        { "name": "job", "comment": "Free text job name", "x": 260, "y": 160, "w": 300, "h": 32,
+          "kind": { "Text": { "vp": null, "len": 16, "color": [255, 255, 255], "input": true } } },
+        { "name": "mode_label", "x": 24, "y": 228, "w": 200, "h": 28,
+          "kind": { "Label": { "text": "Mode", "size": 22.0, "color": [148, 163, 184] } } },
+        { "name": "mode", "comment": "Welding process: 0 MIG, 1 TIG, 2 Stick", "x": 260, "y": 220, "w": 220, "h": 44,
+          "kind": { "Dropdown": { "vp": null, "options": ["MIG", "TIG", "Stick"], "size": 22.0, "fg": [255, 255, 255], "bg": [51, 65, 85] } } },
+        { "name": "to_monitor", "x": 606, "y": 392, "w": 170, "h": 64,
+          "kind": { "Button": { "text": "Monitor", "size": 24.0, "fg": [255, 255, 255], "bg": [37, 99, 235], "pressed_bg": [29, 78, 216],
+            "radius": 12.0, "goto": 2, "event": "None" } } },
         { "name": "back", "x": 24, "y": 392, "w": 170, "h": 64,
           "kind": { "Button": { "text": "Back", "size": 24.0, "fg": [255, 255, 255], "bg": [71, 85, 105], "pressed_bg": [51, 65, 85],
             "radius": 12.0, "goto": 0, "event": "None" } } }
+      ]
+    },
+    {
+      "name": "monitor",
+      "bg": [15, 23, 42],
+      "widgets": [
+        { "name": "monitor_title", "x": 24, "y": 20, "w": 400, "h": 40,
+          "kind": { "Label": { "text": "Monitor", "size": 34.0, "color": [255, 255, 255] } } },
+        { "name": "amps", "comment": "Measured current 0..200 A", "x": 24, "y": 80, "w": 220, "h": 220,
+          "kind": { "Gauge": { "vp": null, "min": 0, "max": 200, "sweep": 270, "needle": [239, 68, 68], "dial": [148, 163, 184] } } },
+        { "name": "wire", "comment": "Wire spool left, percent", "x": 24, "y": 330, "w": 220, "h": 24,
+          "kind": { "Progress": { "vp": null, "min": 0, "max": 100, "fg": [34, 197, 94], "bg": [51, 65, 85], "border": [148, 163, 184], "vertical": false } } },
+        { "name": "volts", "comment": "Arc voltage history, channel 0", "x": 280, "y": 80, "w": 496, "h": 274,
+          "kind": { "Chart": { "channel": 0, "min": 0, "max": 50, "step": 2, "color": [56, 189, 248], "bg": [2, 6, 23] } } },
+        { "name": "back2", "x": 24, "y": 392, "w": 170, "h": 64,
+          "kind": { "Button": { "text": "Back", "size": 24.0, "fg": [255, 255, 255], "bg": [71, 85, 105], "pressed_bg": [51, 65, 85],
+            "radius": 12.0, "goto": 1, "event": "None" } } }
       ]
     }
   ]

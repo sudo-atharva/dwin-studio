@@ -123,6 +123,23 @@ pub static SHOW_KINDS: &[Kind] = &[
         box_y1@20:2, length@22:2, font0@24:1, font1@25:1, font_w@26:1, font_h@27:1,
         encode@28:1, hor_gap@29:1, ver_gap@30:1,
     ]},
+    // Text clock. lib low 7 bits; format chars Y M D H Q S W.
+    Kind { code: 0x12, name: "rtc_text", size: 13, fields: fields![
+        sp@2:2, x@8:2, y@10:2, color@12:2, lib@14:1, font_size@15:1, format@16:16,
+    ]},
+    Kind { code: 0x20, name: "curve", size: 11, fields: fields![
+        sp@2:2, move_dir@6:1, display_mode@7:1, x0@8:2, y0@10:2, x1@12:2, y1@14:2, y_center@16:2,
+        v_center@18:2, color@20:2, mul_y@22:2, channel@24:1, step@25:1, pixel_scale@26:1,
+    ]},
+    // flags: 0x80 show percent, 0x02 no back fill, 0x01 no border.
+    Kind { code: 0x23, name: "progress_bar", size: 13, fields: fields![
+        sp@2:2, vp@6:2, x0@8:2, y0@10:2, x1@12:2, y1@14:2, border_color@16:2, fore_color@18:2,
+        back_color@20:2, v_max@22:2, v_min@24:2, flags@26:1, orientation@27:1, var_type@28:1, vp_rt@30:2,
+    ]},
+    Kind { code: 0x25, name: "qr_code", size: 8, fields: fields![
+        sp@2:2, vp@6:2, x@8:2, y@10:2, dot@13:1, fix_mode@14:1, display_mode@15:1, bg_color@16:2,
+        code_color@18:2,
+    ]},
 ];
 
 fn decode(kind: &Kind, b: &[u8]) -> Params {
