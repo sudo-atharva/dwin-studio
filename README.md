@@ -8,6 +8,8 @@ Design your screens, press <b>Build</b>, copy <code>DWIN_SET</code> to the SD ca
 It can replace DGUS V7.6.
 </p>
 
+<p align="center">by <a href="https://github.com/sudo-atharva"><b>sudo-atharva</b></a></p>
+
 ![Editor, dark theme](docs/editor-dark.png)
 
 ## Why
@@ -134,11 +136,48 @@ Known limits:
 Tests: `cargo test`. The byte-for-byte DGUS round-trip tests run only when DWIN's sample
 projects (`DWIN_Training_Demos-master`, `DWIN2_Display-main`) sit next to this folder.
 
+## Branches
+
+- `master`: stable releases. Download from here.
+- `experiment`: new features and fixes being tried out. It may break; it gets merged
+  into `master` once it has been tested on hardware.
+
+## Roadmap
+
+**Now (1.x)**
+- [x] Visual editor, simulator, PC-as-screen over COM, DGUS import, themes
+- [x] Tested on a DWIN T5L display
+- [ ] Test on more DWIN models and sizes (help wanted: open an issue with your model)
+- [ ] Generate `T5LCFG.CFG` instead of copying it
+- [ ] DGUS extras: page transitions, video, camera, icon drag, parameter settings
+
+**Next: open the `.dwin` format to other tools**
+- [ ] **Export to LVGL:** turn a `.dwin` project into LVGL v9 C code (`ui.c` / `ui.h`,
+      screens, styles, images, fonts) for ESP32, STM32, RP2040 and any display LVGL supports
+- [ ] Export to EEZ Studio / SquareLine-style projects, and import back
+- [ ] MCU library generator: typed `on_<widget>()` callbacks and `set_<widget>()` calls for
+      Arduino, ESP-IDF and STM32 HAL, generated from the project (beyond `ui_gen.h`)
+- [ ] AI agent access (MCP server): let an AI assistant create and edit screens, build,
+      and run the simulator
+- [ ] Web version (runs in the browser, same editor)
+
+**Goal: DWIN replacement framework**
+- [ ] Open firmware that runs `.dwin` projects on ordinary hardware (for example ESP32-S3 or
+      RP2040 with any TFT and touch panel) using LVGL
+- [ ] Speaks the same DGUS UART protocol (`5A A5 ... 82/83`), so an existing MCU board
+      works with it unchanged: swap the DWIN display for any cheap screen
+- [ ] Loads projects from SD card or over UART/USB, like `DWIN_SET` today
+- [ ] One project file, three targets: real DWIN display, LVGL device, PC simulator
+
+## Author
+
+**[sudo-atharva](https://github.com/sudo-atharva)**: idea, design, hardware testing.
+
 ## Built with AI assistance
 
 This project was written with an AI coding assistant:
 [Claude](https://www.anthropic.com/claude) (Anthropic), used through Claude Code.
-The author designed it, tested it on real hardware and made the calls; Claude wrote
+The author ([sudo-atharva](https://github.com/sudo-atharva)) designed it, tested it on real hardware and made the calls; Claude wrote
 most of the code under that direction.
 
 ## License
