@@ -67,6 +67,11 @@ fn main() -> eframe::Result {
         }
         return Ok(());
     }
+    if args.get(1).map(String::as_str) == Some("mcp") {
+        // AI assistants start this and talk JSON-RPC over stdin/stdout.
+        dwin_studio::mcp::serve(std::io::stdin().lock(), std::io::stdout().lock());
+        return Ok(());
+    }
     if args.get(1).map(String::as_str) == Some("import") {
         let [_, _, dir, out] = &args[..] else {
             eprintln!("usage: dwin-studio import <DWIN_SET dir> <new.dwin>");

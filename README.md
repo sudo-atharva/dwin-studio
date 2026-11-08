@@ -115,17 +115,54 @@ An AI agent can make one by writing that file. The fields are documented in
 
 ![Editor, light theme](docs/editor-light.png)
 
-## For AI agents
+## AI agents (MCP)
 
-There's no dedicated agent API yet; an MCP server is on the [roadmap](#roadmap). What an
-agent can do today:
+DWIN Studio has an MCP server built in. Connect it to an AI assistant, give the assistant
+a flow chart and say what each button does, and it builds the screens, checks them with
+screenshots, runs the build and taps through them in the simulator.
 
-- **Create or edit projects:** a `.dwin` file is plain JSON. `examples/showcase/showcase.dwin`
-  uses every widget, and `examples/showcase.rs` shows how to generate one from code.
-- **Build headless:** `dwin-studio build project.dwin out_dir` writes `DWIN_SET`,
-  `ui_map.txt` and `ui_gen.h`, and prints warnings. The exit code is 1 on error.
-- **Import DGUS projects:** `dwin-studio import path/to/DWIN_SET new.dwin`
-- **Make themes:** write a JSON file into `themes/` (see [Themes](#themes)).
+**Claude Desktop:** Settings → Developer → Edit Config, and add:
+
+```json
+{
+  "mcpServers": {
+    "dwin-studio": {
+      "command": "C:\path\to\DWIN Studio.exe",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+**Claude Code:**
+
+```sh
+claude mcp add dwin-studio -- "C:/path/to/DWIN Studio.exe" mcp
+```
+
+Any other MCP client works the same way: run `dwin-studio mcp` (JSON-RPC over stdio).
+
+Then ask, for example:
+
+> Make pump.dwin, 800x480. HOME: title "Pump Controller", START and STOP buttons that tell
+> the MCU, a flow-rate number from the MCU, a Settings button. SETTINGS: speed setpoint
+> the user types (0-100 %), Back button. Build it and test it in the simulator.
+
+| Tools | |
+|---|---|
+| `new_project`, `open_project`, `get_project`, `set_project` | create, load, read, or replace a whole project |
+| `widget_types` | every widget type with its properties |
+| `add_screen`, `update_screen`, `remove_screen` | screens, backgrounds, swipe targets |
+| `add_widget`, `update_widget`, `remove_widget` | widgets: position, size, text, colors, button actions, comments |
+| `build` | writes `DWIN_SET`, `ui_map.txt`, `ui_gen.h` and returns warnings |
+| `screenshot` | PNG of a screen, or of the running simulator |
+| `sim_start`, `sim_tap`, `sim_drag`, `sim_type`, `sim_send`, `sim_read` | run the simulator: touch, type, MCU frames, read values |
+
+Every edit is saved to the `.dwin` file right away. Open the file in the editor to see the
+result or keep working on it by hand.
+
+Without MCP, agents can still write `.dwin` files directly (plain JSON), build with
+`dwin-studio build project.dwin out_dir` and import with `dwin-studio import DWIN_SET new.dwin`.
 
 ## Project files
 
@@ -169,8 +206,9 @@ projects (`DWIN_Training_Demos-master`, `DWIN2_Display-main`) sit next to this f
 - [ ] Export to EEZ Studio / SquareLine-style projects, and import back
 - [ ] MCU library generator: typed `on_<widget>()` callbacks and `set_<widget>()` calls for
       Arduino, ESP-IDF and STM32 HAL, generated from the project (beyond `ui_gen.h`)
-- [ ] AI agent access (MCP server): let an AI assistant create and edit screens, build,
-      and run the simulator
+- [x] AI agent access (MCP server): let an AI assistant create and edit screens, build,
+      and run the simulator (`experiment` branch, coming in 1.1)
+- [ ] Chat inside the editor, using Claude Code if it is installed
 - [ ] Web version (runs in the browser, same editor)
 
 **Goal: DWIN replacement framework**

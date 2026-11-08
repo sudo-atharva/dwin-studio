@@ -1,6 +1,6 @@
 [package]
 name = "dwin-studio"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2024"
 description = "Visual screen editor and simulator for DWIN T5L (DGUS II) displays"
 license = "MIT"
