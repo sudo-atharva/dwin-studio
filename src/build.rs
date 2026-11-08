@@ -107,7 +107,8 @@ pub fn allocate(p: &Project) -> (Vec<Alloc>, Vec<String>) {
         for b in &all[i + 1..] {
             // Several key buttons on one VP is a normal DGUS pattern (one variable, many keys).
             // So is one VP holding many bit flags.
-            let shared_ok = a.what == b.what && ["button", "bits"].contains(&a.what) && a.vp == b.vp;
+            // And so is showing one value twice (number + icon) at the same address.
+            let shared_ok = a.vp == b.vp && (a.words == b.words || (a.what == b.what && ["button", "bits"].contains(&a.what)));
             if !shared_ok && overlaps(a, b.vp, b.words) {
                 warnings.push(format!("VP clash {:#06x}: '{}' and '{}'", b.vp, a.name, b.name));
             }
@@ -655,6 +656,12 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
     set.raw.insert("22_Config.bin".into(), config);
     // Font 0 drawn with the editor font: numbers/text look like the preview.
     set.raw.insert("0_DWIN_ASC.HZK".into(), crate::render::ascii_hzk());
+    if let Some(cfg) = &p.cfg {
+        match std::fs::read(base.join(cfg)) {
+            Ok(b) => drop(set.raw.insert("T5LCFG.CFG".into(), b)),
+            Err(e) => warnings.push(format!("T5LCFG.CFG not copied ({cfg}): {e}")),
+        }
+    }
     warnings.extend(flash_overlaps(&set));
 
     let header = header(p, &allocs);
@@ -842,6 +849,7 @@ mod tests {
             page_lib: 32,
             icon_lib: 48,
             font: None,
+            cfg: None,
             pages: vec![
                 Page { name: "home".into(), bg: [10, 20, 30], bg_image: None, swipe: (None, None), widgets: vec![
                     Widget::new(palette("Button"), "start", 20, 20),

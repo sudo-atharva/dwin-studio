@@ -6,6 +6,7 @@
 pub mod build;
 pub mod control;
 pub mod icl;
+pub mod import;
 pub mod picture;
 pub mod project;
 pub mod render;

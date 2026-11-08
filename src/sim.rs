@@ -584,6 +584,7 @@ mod tests {
             page_lib: 32,
             icon_lib: 48,
             font: None,
+            cfg: None,
             pages: vec![
                 Page { name: "a".into(), bg: [0; 3], bg_image: None, swipe: (None, None), widgets: vec![
                     Widget::new(kind("Button"), "key", 0, 0),          // VP 0x1000, key 1

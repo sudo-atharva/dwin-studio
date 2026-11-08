@@ -26,6 +26,10 @@ pub struct Project {
     /// (0_DWIN_ASC.HZK). None = built-in Ubuntu.
     #[serde(default)]
     pub font: Option<String>,
+    /// The screen's own T5LCFG.CFG (baud, backlight, LCD timing), copied into every build.
+    /// Not generated: a wrong byte there can blank the panel.
+    #[serde(default)]
+    pub cfg: Option<String>,
 }
 
 fn page_lib() -> u8 {
@@ -84,6 +88,9 @@ pub enum WidgetKind {
         /// Switch to this page index on release.
         goto: Option<usize>,
         event: Event,
+        /// Touch area only: nothing drawn (the page picture shows the button).
+        #[serde(default)]
+        invisible: bool,
     },
     /// Number shown by the screen from a VP (int16, fixed-point by `dec_digits`).
     /// `input` = Some((min, max)): tapping opens a generated keypad.
@@ -265,7 +272,7 @@ fn yes() -> bool {
 pub fn button(text: &str, event: Event) -> WidgetKind {
     WidgetKind::Button {
         text: text.into(), size: 24.0, fg: [255; 3], bg: [37, 99, 235], pressed_bg: [29, 78, 216],
-        radius: 10.0, image: None, goto: None, event,
+        radius: 10.0, image: None, goto: None, event, invisible: false,
     }
 }
 
@@ -315,6 +322,7 @@ impl Default for Project {
             page_lib: page_lib(),
             icon_lib: icon_lib(),
             font: None,
+            cfg: None,
             pages: vec![Page { name: "home".into(), bg: [15, 23, 42], bg_image: None, swipe: (None, None), widgets: vec![] }],
         }
     }

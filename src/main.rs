@@ -52,6 +52,26 @@ fn main() -> eframe::Result {
         }
         return Ok(());
     }
+    if args.get(1).map(String::as_str) == Some("import") {
+        let [_, _, dir, out] = &args[..] else {
+            eprintln!("usage: dwin-studio import <DWIN_SET dir> <new.dwin.json>");
+            return Ok(());
+        };
+        let out = Path::new(out);
+        let folder = out.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+        match dwin_studio::import::import(Path::new(dir), folder) {
+            Ok((p, report)) => {
+                std::fs::write(out, serde_json::to_string_pretty(&p).unwrap()).expect("write project");
+                println!("{}", report.join("
+"));
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                std::process::exit(1);
+            }
+        }
+        return Ok(());
+    }
     let path = args.get(1).map(PathBuf::from);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([1480.0, 900.0]).with_maximized(true),
@@ -217,6 +237,27 @@ impl App {
                 self.status = format!("Save failed: {e}");
                 false
             }
+        }
+    }
+
+    /// DWIN_SET folder -> new project saved where the user says (pictures go to its assets/).
+    fn import_dgus(&mut self) {
+        let Some(dir) = rfd::FileDialog::new().set_title("DGUS DWIN_SET folder to import").pick_folder() else { return };
+        let dlg = rfd::FileDialog::new().set_title("Save the imported project as").add_filter("DWIN Studio", &["json"]);
+        let Some(out) = dlg.set_file_name("imported.dwin.json").save_file() else { return };
+        let folder = out.parent().unwrap_or(Path::new(".")).to_path_buf();
+        match dwin_studio::import::import(&dir, &folder) {
+            Ok((p, report)) => {
+                let saved = serde_json::to_string_pretty(&p).map_err(|e| e.to_string()).and_then(|j| std::fs::write(&out, j).map_err(|e| e.to_string()));
+                if let Err(e) = saved {
+                    self.status = format!("Import save failed: {e}");
+                    return;
+                }
+                let _ = std::fs::write(folder.join("import_report.txt"), report.join("\n"));
+                self.load(out);
+                self.status = format!("{} - details in import_report.txt", report[0]);
+            }
+            Err(e) => self.status = format!("Import failed: {e}"),
         }
     }
 
@@ -453,6 +494,9 @@ impl App {
             }
             if ui.button("Save as…").clicked() {
                 self.save(true);
+            }
+            if ui.button("⬇ Import DGUS…").on_hover_text("Open an existing DGUS DWIN_SET folder as a project").clicked() {
+                self.import_dgus();
             }
             ui.separator();
             let running = self.sim.is_some();
@@ -768,6 +812,21 @@ impl App {
                 });
                 ui.end_row();
             });
+            ui.horizontal(|ui| {
+                ui.label("T5LCFG.CFG");
+                let name = self.project.cfg.as_deref().map_or("(none)".to_string(), |f| f.trim_start_matches("assets/").to_string());
+                if ui.button(name).on_hover_text("Your screen's own config file, copied into each build unchanged").clicked() {
+                    if let Some(f) = rfd::FileDialog::new().add_filter("T5L config", &["CFG", "cfg"]).pick_file() {
+                        let dir = self.base().join("assets");
+                        if std::fs::create_dir_all(&dir).and_then(|_| std::fs::copy(&f, dir.join("T5LCFG.CFG"))).is_ok() {
+                            self.project.cfg = Some("assets/T5LCFG.CFG".into());
+                        }
+                    }
+                }
+                if self.project.cfg.is_some() && ui.small_button("✕").clicked() {
+                    self.project.cfg = None;
+                }
+            });
             ui.label(RichText::new("DGUS default: pages 32.icl. Use what your screen's firmware expects (e.g. 23 / 32 pages, 41-48 icons).").weak().small());
         });
 
@@ -1028,7 +1087,10 @@ impl App {
                     }
                     ui.end_row();
                 }
-                WidgetKind::Button { text, size, fg, bg, pressed_bg, radius, image, .. } => {
+                WidgetKind::Button { text, size, fg, bg, pressed_bg, radius, image, invisible, .. } => {
+                    ui.label("Look");
+                    ui.checkbox(invisible, "invisible (touch area only)");
+                    ui.end_row();
                     text_row(ui, "Text", text);
                     size_row(ui, size);
                     color_row(ui, "Text color", fg);
@@ -1319,7 +1381,10 @@ impl App {
         let snap = move |v: f32| (v / grid as f32).round() as i32 * grid;
 
         for w in self.widgets() {
-            if matches!(w.kind, WidgetKind::Number { .. } | WidgetKind::Text { .. } | WidgetKind::Clock { .. } | WidgetKind::Qr { .. }) {
+            if matches!(
+                w.kind,
+                WidgetKind::Number { .. } | WidgetKind::Text { .. } | WidgetKind::Clock { .. } | WidgetKind::Qr { .. } | WidgetKind::Button { invisible: true, .. }
+            ) {
                 painter.rect_stroke(wrect(w), 0.0, Stroke::new(1.0, Color32::from_gray(110)), StrokeKind::Inside);
             }
         }

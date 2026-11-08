@@ -248,6 +248,7 @@ pub fn render(page: &Page, width: u16, height: u16, mode: Mode, base: &Path) -> 
                 Some(img) => picture(&mut px, &img, w.rect(), 1.0),
                 None => missing(&mut px, w),
             },
+            WidgetKind::Button { invisible: true, .. } => {}
             WidgetKind::Button { text: t, size, fg, bg, pressed_bg, radius, image, .. } => {
                 let pressed = mode == Mode::Pressed;
                 match image.as_deref().and_then(|p| load_image(base, p)) {
