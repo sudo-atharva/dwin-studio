@@ -40,8 +40,20 @@ fn cli_build(project: &str, out: &str) -> Result<(), Box<dyn std::error::Error>>
     Ok(())
 }
 
+#[cfg(windows)]
+unsafe extern "system" {
+    fn AttachConsole(pid: u32) -> i32;
+}
+
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 fn main() -> eframe::Result {
     let args: Vec<String> = std::env::args().collect();
+    // Release exe has no console window; build/import print to the terminal that ran them.
+    #[cfg(windows)]
+    if args.len() > 1 && matches!(args[1].as_str(), "build" | "import") {
+        unsafe { AttachConsole(u32::MAX) };
+    }
     if args.get(1).map(String::as_str) == Some("build") {
         if let [_, _, project, out] = &args[..] {
             if let Err(e) = cli_build(project, out) {
@@ -75,7 +87,10 @@ fn main() -> eframe::Result {
     }
     let path = args.get(1).map(PathBuf::from);
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1480.0, 900.0]).with_maximized(true),
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([1480.0, 900.0])
+            .with_maximized(true)
+            .with_icon(eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon.png")).expect("icon")),
         ..Default::default()
     };
     eframe::run_native(
@@ -617,6 +632,7 @@ impl App {
                     if self.warn_count > 0 {
                         ui.label(RichText::new(format!("⚠ {}", self.warn_count)).small());
                     }
+                    ui.label(RichText::new(format!("v{VERSION}")).small());
                     let zoom = self.zoom.map_or("Fit".to_string(), |z| format!("{:.0}%", z * 100.0));
                     ui.label(RichText::new(zoom).small());
                     ui.label(RichText::new(format!("{} × {}", self.project.width, self.project.height)).small());
@@ -1956,7 +1972,7 @@ impl eframe::App for App {
             self.undo.push(before);
             self.redo.clear();
         }
-        let title = format!("DWIN Studio - {}", self.path.as_ref().map_or("untitled".into(), |p| p.display().to_string()));
+        let title = format!("DWIN Studio {VERSION} - {}", self.path.as_ref().map_or("untitled".into(), |p| p.display().to_string()));
         if title != self.title {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
             self.title = title;
