@@ -760,6 +760,26 @@ impl App {
                 ui.label(&a.name).on_hover_text(&w.comment);
                 ui.monospace(format!("{:#06x}", a.vp));
                 match &w.kind {
+                    WidgetKind::List { items, mcu_len, .. } if *mcu_len > 0 => {
+                        ui.vertical(|ui| {
+                            let mut v = sim.get(a.vp) as i32;
+                            if ui.add(egui::DragValue::new(&mut v).range(0..=items.len() as i32)).changed() {
+                                sim.set(a.vp, v as u16);
+                            }
+                            for i in 0..items.len() {
+                                let rvp = WidgetKind::row_vp(a.vp, *mcu_len, i);
+                                let mut t = sim.text_at(rvp, *mcu_len);
+                                if ui.add(egui::TextEdit::singleline(&mut t).desired_width(110.0).hint_text(format!("row {} @ {rvp:#06x}", i + 1))).changed() {
+                                    let mut b = t.into_bytes();
+                                    b.truncate(*mcu_len as usize);
+                                    b.extend([0xFF, 0xFF]);
+                                    for (k, pair) in b.chunks(2).enumerate() {
+                                        sim.set(rvp + k as u16, u16::from_be_bytes([pair[0], *pair.get(1).unwrap_or(&0xFF)]));
+                                    }
+                                }
+                            }
+                        });
+                    }
                     WidgetKind::Text { len, unicode: true, .. } => {
                         let mut t = sim.utf16_at(a.vp, *len);
                         if ui.add(egui::TextEdit::singleline(&mut t).desired_width(110.0)).changed() {
@@ -1174,7 +1194,18 @@ impl App {
                     ui.checkbox(wrap, "wrap around");
                     ui.end_row();
                 }
-                WidgetKind::List { items, size, fg, bg, sel, .. } => {
+                WidgetKind::List { items, size, fg, bg, sel, mcu_len, .. } => {
+                    ui.label("Row text");
+                    ui.horizontal(|ui| {
+                        let mut on = *mcu_len > 0;
+                        if ui.checkbox(&mut on, "from MCU").changed() {
+                            *mcu_len = if on { 20 } else { 0 };
+                        }
+                        if *mcu_len > 0 {
+                            ui.add(egui::DragValue::new(mcu_len).range(2..=200)).on_hover_text("bytes per row");
+                        }
+                    });
+                    ui.end_row();
                     ui.label("Items\n(one per line)");
                     let mut s = items.join("\n");
                     if ui.add(egui::TextEdit::multiline(&mut s).desired_rows(5)).changed() {
@@ -1186,7 +1217,7 @@ impl App {
                     color_row(ui, "Fill", bg);
                     color_row(ui, "Selected", sel);
                     ui.label("");
-                    ui.label(RichText::new("Tap row n sends VP = n (0 = none).\nAdd a Button (send key) as OK.").weak().small());
+                    ui.label(RichText::new("Rows = number of lines above.\nTap row n sends VP = n (0 = none).\nAdd a Button (send key) as OK.").weak().small());
                     ui.end_row();
                 }
                 WidgetKind::Dropdown { options, size, fg, bg, .. } => {
@@ -1291,6 +1322,7 @@ impl App {
                 let label = match event {
                     Event::None => "Nothing",
                     Event::Key { .. } => "Send key to MCU",
+                    Event::Latch { .. } => "On/off (stays pressed)",
                     Event::Adjust { .. } => "Change a value (+/−)",
                 };
                 ui.horizontal(|ui| {
@@ -1302,6 +1334,9 @@ impl App {
                         if ui.selectable_label(matches!(event, Event::Key { .. }), "Send key to MCU").clicked() {
                             *event = Event::Key { vp: None, key: 1 };
                         }
+                        if ui.selectable_label(matches!(event, Event::Latch { .. }), "On/off (stays pressed)").clicked() {
+                            *event = Event::Latch { vp: None };
+                        }
                         if ui.selectable_label(matches!(event, Event::Adjust { .. }), "Change a value (+/−)").clicked() {
                             let target = targets.first().cloned().unwrap_or_default();
                             *event = Event::Adjust { target, step: 1, min: 0, max: 100, wrap: false, repeat: true };
@@ -1310,6 +1345,9 @@ impl App {
                 });
                 match event {
                     Event::None => {}
+                    Event::Latch { .. } => {
+                        ui.label(RichText::new("Tap: VP 0 -> 1 (looks pressed) -> 0 ... and sends it").weak());
+                    }
                     Event::Key { key, .. } => {
                         ui.horizontal(|ui| {
                             ui.label("Key value");
@@ -1624,8 +1662,8 @@ fn kind_icon(k: &WidgetKind) -> &'static str {
 
 /// Palette groups, EEZ-style. Names match `default_widgets()`; anything new lands in "More".
 const GROUPS: &[(&str, &[&str])] = &[
-    ("Basic", &["Label", "Panel", "Button", "+ / − Button"]),
-    ("Input", &["Number Input", "Text Input", "Toggle", "Slider", "Knob", "Dropdown", "List", "Roller"]),
+    ("Basic", &["Label", "Panel", "Button", "On/Off Button", "+ / − Button"]),
+    ("Input", &["Number Input", "Text Input", "Toggle", "Slider", "Knob", "Dropdown", "List", "MCU List", "Roller"]),
     ("Display", &["Number", "Big Number", "Text", "Unicode Text", "Scrolling Text", "Lamp", "Icons", "Progress", "Gauge", "Clock", "QR Code"]),
     ("Graphics", &["Chart", "Drawing", "Animation"]),
 ];

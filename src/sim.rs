@@ -17,6 +17,8 @@ pub enum Prompt {
     Number { vp: u16, dec: u8, min: i32, max: i32 },
     Text { vp: u16, len: u16 },
     Menu { vp: u16, options: Vec<String> },
+    /// Set the clock: digits YYMMDDhhmm[ss] or hhmm[ss].
+    Clock,
 }
 
 /// Keypad / keyboard / list open on the simulated screen (DWIN copies it in from a
@@ -48,6 +50,8 @@ pub struct Sim {
     /// Where the finger went down (swipe detection).
     down_x: i32,
     start: Instant,
+    /// Simulated RTC = PC clock + this many seconds (set by keypad or MCU 0x009C write).
+    pub clock_offset: i64,
 }
 
 fn hex(b: &[u8]) -> String {
@@ -58,7 +62,7 @@ impl Sim {
     pub fn new(p: &Project) -> Self {
         let mut s = Sim {
             page: 0, mem: vec![0; 0x20000], allocs: allocate(p).0, out: vec![], log: vec![], rx: vec![],
-            curves: Default::default(), held: None, popup: None, down_x: 0, start: Instant::now(),
+            curves: Default::default(), held: None, popup: None, clock_offset: 0, down_x: 0, start: Instant::now(),
         };
         for a in s.allocs.clone() {
             if let WidgetKind::Animation { autoplay: true, .. } = p.pages[a.page].widgets[a.widget].kind {
@@ -132,6 +136,7 @@ impl Sim {
             w.kind,
             WidgetKind::Button { .. } | WidgetKind::Toggle { .. } | WidgetKind::Slider { .. } | WidgetKind::Dropdown { .. } | WidgetKind::List { .. } | WidgetKind::Roller { .. }
                 | WidgetKind::Gauge { knob: true, .. }
+                | WidgetKind::Clock { settable: true, .. }
                 | WidgetKind::Number { input: Some(_), .. } | WidgetKind::Text { input: true, .. }
         )
     }
@@ -151,7 +156,7 @@ impl Sim {
         let w = &p.pages[self.page].widgets[field];
         let (sw, sh) = (p.width as i32, p.height as i32);
         let ((extra, area), pos) = match (&prompt, &w.kind) {
-            (Prompt::Number { .. }, _) => {
+            (Prompt::Number { .. } | Prompt::Clock, _) => {
                 let k = keypad(sw, sh);
                 let pos = keypad_pos(w, k.1, sw);
                 (k, pos)
@@ -208,6 +213,16 @@ impl Sim {
                     pp.typed.clear(); // the screen rejects out-of-range input
                 }
             }
+            (Prompt::Clock, 0xF1) => {
+                let typed = pp.typed.clone();
+                match parse_time(&typed, now_secs() + self.clock_offset) {
+                    Some(t) => {
+                        self.clock_offset = t - now_secs();
+                        self.popup = None;
+                    }
+                    None => pp.typed.clear(),
+                }
+            }
             (Prompt::Text { vp, len }, 0xF1) => {
                 let (vp, len, typed) = (*vp, *len, pp.typed.clone());
                 self.popup = None;
@@ -226,6 +241,7 @@ impl Sim {
         let Some(pp) = &mut self.popup else { return };
         let ok = match pp.prompt {
             Prompt::Number { .. } => ch.is_ascii_digit() || ch == '-' || ch == '.',
+            Prompt::Clock => ch.is_ascii_digit() && pp.typed.len() < 12,
             Prompt::Text { len, .. } => ch.is_ascii() && !ch.is_ascii_control() && pp.typed.len() < len as usize,
             Prompt::Menu { .. } => false,
         };
@@ -242,9 +258,15 @@ impl Sim {
         let vp = self.vp(self.page, wi);
         self.held = Some(wi);
         match &w.kind {
+            WidgetKind::Clock { .. } => return Some(Prompt::Clock),
             WidgetKind::Button { event, goto, .. } => {
                 match event {
                     Event::None => {}
+                    Event::Latch { .. } => {
+                        let v = (self.get(vp?) == 0) as u16;
+                        self.set(vp?, v);
+                        self.send(vp?);
+                    }
                     Event::Key { key, .. } => {
                         self.set(vp?, *key);
                         self.send(vp?);
@@ -415,6 +437,12 @@ impl Sim {
                 if vp == 0x0084 && data.len() >= 4 && data[..2] == [0x5A, 0x01] {
                     self.page = u16::from_be_bytes([data[2], data[3]]) as usize;
                 }
+                // RTC: 5A A5 YY MM DD hh mm ss (BCD or binary both seen; binary assumed).
+                if vp == 0x009C && data.len() >= 8 && data[..2] == [0x5A, 0xA5] {
+                    let d = &data[2..8];
+                    let t = days_from_civil(2000 + d[0] as i64, d[1] as i64, d[2] as i64) * 86400 + d[3] as i64 * 3600 + d[4] as i64 * 60 + d[5] as i64;
+                    self.clock_offset = t - now_secs();
+                }
                 if vp == 0x0310 && data.len() >= 4 && data[..2] == [0x5A, 0xA5] {
                     self.curve_data(data);
                 }
@@ -456,7 +484,11 @@ impl Sim {
                 };
                 if !matches!(pp.prompt, Prompt::Menu { .. }) {
                     rounded(&mut px, frect(w), 6.0, [51, 65, 85]);
-                    text(&mut px, &format!("{}_", pp.typed), w.x as f32, w.y as f32, w.h as f32, color);
+                    let shown = match (&pp.prompt, pp.typed.is_empty()) {
+                        (Prompt::Clock, true) => "YYMMDDhhmm or hhmm".to_string(),
+                        _ => format!("{}_", pp.typed),
+                    };
+                    text(&mut px, &shown, w.x as f32, w.y as f32, w.h as f32, color);
                 }
             }
             // Copy the keypad area from its page, like DWIN does.
@@ -489,6 +521,20 @@ impl Sim {
                     draw_state(&mut px, w, (v >> (b % 16) & 1) as usize, base)
                 }
                 WidgetKind::Toggle { .. } | WidgetKind::Lamp { .. } => draw_state(&mut px, w, (v != 0) as usize, base),
+                WidgetKind::Button { event: Event::Latch { .. }, .. } => draw_state(&mut px, w, (v != 0) as usize, base),
+                WidgetKind::List { items, mcu_len, size, fg, .. } if *mcu_len > 0 => {
+                    let mut face = w.clone();
+                    if let WidgetKind::List { items, .. } = &mut face.kind {
+                        items.iter_mut().for_each(String::clear);
+                    }
+                    draw_state(&mut px, &face, v as usize, base);
+                    let rh = hh / items.len().max(1) as f32;
+                    let vp = self.vp(self.page, wi).unwrap_or(0);
+                    for i in 0..items.len() {
+                        let s = self.text_at(WidgetKind::row_vp(vp, *mcu_len, i), *mcu_len);
+                        text(&mut px, &s, x + 12.0, y + i as f32 * rh + (rh - size) / 2.0, *size, *fg);
+                    }
+                }
                 WidgetKind::Icons { .. } | WidgetKind::Dropdown { .. } | WidgetKind::List { .. } | WidgetKind::Roller { .. } => draw_state(&mut px, w, v as usize, base),
                 WidgetKind::Animation { images, period_ms, .. } => {
                     let n = images.len().max(1) as u64;
@@ -510,7 +556,7 @@ impl Sim {
                     });
                     text(&mut px, &s, x, y, hh, *color);
                 }
-                WidgetKind::Clock { format, color, .. } => text(&mut px, &clock(format), x, y, hh, *color),
+                WidgetKind::Clock { format, color, .. } => text(&mut px, &clock(format, self.clock_offset), x, y, hh, *color),
                 WidgetKind::Progress { min, max, fg, bg, border, vertical, .. } => {
                     let f = frac(*min as f32, *max as f32);
                     rounded(&mut px, (x, y, ww, hh), 0.0, *border);
@@ -556,10 +602,45 @@ impl Sim {
     }
 }
 
-/// System clock in UTC, in the DGUS RTC format letters.
-/// ponytail: UTC only (no tz crate); the real screen shows whatever the MCU set.
-pub fn clock(format: &str) -> String {
-    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()) as i64;
+fn now_secs() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()) as i64
+}
+
+/// Days since 1970-01-01 for a civil date (H. Hinnant).
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * ((m + 9) % 12) + 2) / 5 + d - 1;
+    era * 146097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468
+}
+
+/// Keypad digits -> seconds since epoch. YYMMDDhhmm[ss] sets everything; hhmm[ss] keeps
+/// the date of `now`. None for anything else or out-of-range fields.
+fn parse_time(s: &str, now: i64) -> Option<i64> {
+    let f = |i: usize| s.get(i..i + 2)?.parse::<i64>().ok();
+    let (date, rest) = match s.len() {
+        10 | 12 => (Some((2000 + f(0)?, f(2)?, f(4)?)), &s[6..]),
+        4 | 6 => (None, s),
+        _ => return None,
+    };
+    let g = |i: usize| rest.get(i..i + 2).map_or(Some(0), |x| x.parse::<i64>().ok());
+    let (h, m, sec) = (g(0)?, g(2)?, g(4)?);
+    if h > 23 || m > 59 || sec > 59 {
+        return None;
+    }
+    let day = match date {
+        Some((y, mo, d)) if (1..=12).contains(&mo) && (1..=31).contains(&d) => days_from_civil(y, mo, d),
+        Some(_) => return None,
+        None => now.div_euclid(86400),
+    };
+    Some(day * 86400 + h * 3600 + m * 60 + sec)
+}
+
+/// Simulated clock (PC time in UTC + `offset` seconds) in the DGUS RTC format letters.
+/// ponytail: UTC only (no tz crate); the real screen shows whatever was set.
+pub fn clock(format: &str, offset: i64) -> String {
+    let secs = now_secs() + offset;
     let days = secs.div_euclid(86400);
     let t = secs.rem_euclid(86400);
     // Civil date from day count (H. Hinnant).
@@ -658,5 +739,12 @@ mod tests {
         s.release(&p2, 100);
         assert_eq!(s.get(0x1000), 50);
         assert_eq!(s.out.len(), 1);
+
+        // Clock set: keypad digits and the MCU write both move the simulated RTC.
+        let t = parse_time("2601021530", 0).unwrap();
+        assert_eq!(t, days_from_civil(2026, 1, 2) * 86400 + 15 * 3600 + 30 * 60);
+        assert!(parse_time("2561", 0).is_none());
+        s.feed(&[0x5A, 0xA5, 0x0B, 0x82, 0x00, 0x9C, 0x5A, 0xA5, 26, 1, 2, 15, 30, 0]);
+        assert!(clock("Y-M-D H:Q", s.clock_offset).starts_with("2026-01-02 15:3"));
     }
 }

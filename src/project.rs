@@ -162,7 +162,18 @@ pub enum WidgetKind {
     Icons { vp: Option<u16>, images: Vec<String> },
     /// Items stacked in rows. Tapping row i highlights it and sends VP = i + 1 (0 = none
     /// selected), so a separate "OK" button can act on the choice.
-    List { vp: Option<u16>, items: Vec<String>, size: f32, fg: Rgb, bg: Rgb, sel: Rgb },
+    /// `mcu_len` > 0: row texts come from the MCU (row i at VP + 0x10 + i * mcu_len/2,
+    /// `mcu_len` bytes ASCII); `items` are then only editor placeholders.
+    List {
+        vp: Option<u16>,
+        items: Vec<String>,
+        size: f32,
+        fg: Rgb,
+        bg: Rgb,
+        sel: Rgb,
+        #[serde(default)]
+        mcu_len: u16,
+    },
     /// Picker wheel: shows previous / current / next item; tapping above or below the
     /// middle steps VP (0..n-1) and sends it. `wrap`: past the end goes back to the start.
     Roller { vp: Option<u16>, items: Vec<String>, size: f32, fg: Rgb, bg: Rgb, wrap: bool },
@@ -206,15 +217,23 @@ pub enum Event {
     None,
     /// Write `key` to VP and send it to the MCU (DGUS return key).
     Key { vp: Option<u16>, key: u16 },
+    /// Latching on/off: each tap flips VP between 0 and 1 and the button stays pressed
+    /// while it is 1.
+    Latch { vp: Option<u16> },
     /// Change another widget's value by `step` (DGUS increment): +/- buttons.
     Adjust { target: String, step: i16, min: u16, max: u16, wrap: bool, repeat: bool },
 }
 
 impl WidgetKind {
+    /// Row `i` text VP of a list filled by the MCU.
+    pub fn row_vp(vp: u16, mcu_len: u16, i: usize) -> u16 {
+        vp + 0x10 + i as u16 * mcu_len.div_ceil(2)
+    }
+
     /// The widget's own VP setting, if it has one.
     pub fn vp_mut(&mut self) -> Option<&mut Option<u16>> {
         match self {
-            WidgetKind::Button { event: Event::Key { vp, .. }, .. }
+            WidgetKind::Button { event: Event::Key { vp, .. } | Event::Latch { vp }, .. }
             | WidgetKind::Number { vp, .. }
             | WidgetKind::Text { vp, .. }
             | WidgetKind::Toggle { vp, .. }
@@ -310,6 +329,7 @@ pub fn button(text: &str, event: Event) -> WidgetKind {
 pub fn default_widgets() -> Vec<(&'static str, WidgetKind)> {
     vec![
         ("Button", button("Button", Event::Key { vp: None, key: 1 })),
+        ("On/Off Button", button("On/Off", Event::Latch { vp: None })),
         ("+ / − Button", button("+", Event::Adjust { target: String::new(), step: 1, min: 0, max: 100, wrap: false, repeat: true })),
         ("Label", WidgetKind::Label { text: "Label".into(), size: 24.0, color: [255; 3] }),
         ("Panel", WidgetKind::Panel { color: [30, 41, 59], radius: 12.0 }),
@@ -330,7 +350,11 @@ pub fn default_widgets() -> Vec<(&'static str, WidgetKind)> {
         }),
         ("List", WidgetKind::List {
             vp: None, items: vec!["Program 1".into(), "Program 2".into(), "Program 3".into(), "Program 4".into()],
-            size: 22.0, fg: [255; 3], bg: [30, 41, 59], sel: [37, 99, 235],
+            size: 22.0, fg: [255; 3], bg: [30, 41, 59], sel: [37, 99, 235], mcu_len: 0,
+        }),
+        ("MCU List", WidgetKind::List {
+            vp: None, items: (1..=4).map(|i| format!("(MCU row {i})")).collect(),
+            size: 22.0, fg: [255; 3], bg: [30, 41, 59], sel: [37, 99, 235], mcu_len: 20,
         }),
         ("Roller", WidgetKind::Roller {
             vp: None, items: (1..=12).map(|m| format!("{m:02}")).collect(), size: 28.0, fg: [255; 3], bg: [30, 41, 59], wrap: true,

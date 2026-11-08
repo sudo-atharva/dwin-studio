@@ -1,6 +1,6 @@
 //! Draw a page to pixels. Same code for the editor canvas and the images that go on the screen.
 
-use crate::project::{Page, Rgb, Widget, WidgetKind};
+use crate::project::{Event, Page, Rgb, Widget, WidgetKind};
 use ab_glyph::{point, Font, FontRef, PxScale, ScaleFont};
 use image::RgbaImage;
 use std::collections::HashMap;
@@ -189,9 +189,19 @@ fn missing(px: &mut Pixmap, w: &Widget) {
     centered(px, frect(w), "?", (w.h as f32 * 0.6).max(8.0), [255, 200, 200]);
 }
 
+fn button_face(px: &mut Pixmap, w: &Widget, pressed: bool, base: &Path) {
+    let WidgetKind::Button { text: t, size, fg, bg, pressed_bg, radius, image, .. } = &w.kind else { return };
+    match image.as_deref().and_then(|p| load_image(base, p)) {
+        Some(img) => picture(px, &img, w.rect(), if pressed { 0.7 } else { 1.0 }),
+        None => rounded(px, frect(w), *radius, if pressed { *pressed_bg } else { *bg }),
+    }
+    centered(px, frect(w), t, *size, *fg);
+}
+
 /// Draw a dynamic widget in a given state (toggle 0/1, icon index, slider knob at min).
 pub fn draw_state(px: &mut Pixmap, w: &Widget, state: usize, base: &Path) {
     match &w.kind {
+        WidgetKind::Button { .. } => button_face(px, w, state > 0, base),
         WidgetKind::Toggle { on, off, knob, .. } => {
             let (x, y, ww, hh) = frect(w);
             rounded(px, (x, y, ww, hh), hh / 2.0, if state > 0 { *on } else { *off });
@@ -264,14 +274,13 @@ pub fn render(page: &Page, width: u16, height: u16, mode: Mode, base: &Path) -> 
                 None => missing(&mut px, w),
             },
             WidgetKind::Button { invisible: true, .. } => {}
-            WidgetKind::Button { text: t, size, fg, bg, pressed_bg, radius, image, .. } => {
-                let pressed = mode == Mode::Pressed;
-                match image.as_deref().and_then(|p| load_image(base, p)) {
-                    Some(img) => picture(&mut px, &img, w.rect(), if pressed { 0.7 } else { 1.0 }),
-                    None => rounded(&mut px, frect(w), *radius, if pressed { *pressed_bg } else { *bg }),
+            // Latching buttons are icons the screen swaps; not part of the background.
+            WidgetKind::Button { event: Event::Latch { .. }, .. } => {
+                if dynamic {
+                    button_face(&mut px, w, false, base)
                 }
-                centered(&mut px, frect(w), t, *size, *fg);
             }
+            WidgetKind::Button { .. } => button_face(&mut px, w, mode == Mode::Pressed, base),
             WidgetKind::Slider { track, show_track, .. } => {
                 // Track is static; the knob is an icon the screen moves.
                 let (x, y, ww, hh) = frect(w);

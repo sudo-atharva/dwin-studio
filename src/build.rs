@@ -72,6 +72,7 @@ pub fn allocate(p: &Project) -> (Vec<Alloc>, Vec<String>) {
                 WidgetKind::Slider { .. } => (1, false, "slider"),
                 WidgetKind::Icons { .. } => (1, false, "icons"),
                 WidgetKind::Dropdown { .. } => (1, false, "dropdown"),
+                WidgetKind::List { items, mcu_len, .. } if *mcu_len > 0 => (0x10 + items.len() as u16 * mcu_len.div_ceil(2), false, "list"),
                 WidgetKind::List { .. } => (1, false, "list"),
                 WidgetKind::Roller { .. } => (1, false, "roller"),
                 WidgetKind::Qr { len, .. } => (len.div_ceil(2) + 1, false, "qr"),
@@ -328,6 +329,24 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
             let a = find(pi, wi);
             let vp = || n(a.unwrap().vp as u32);
             match &w.kind {
+                WidgetKind::Button { goto, event: Event::Latch { .. }, .. } => {
+                    // Two looks as icons (up / held down) on VP 0/1; tap flips it (increment, wrap).
+                    let first = icons.0.len() as u32;
+                    for s in 0..2 {
+                        icons.add(&icon(&base_px, w, s, (w.w, w.h), base))?;
+                    }
+                    let params: Params = vec![
+                        ("sp", n(0xFFFF)), ("vp", vp()), ("x", n(x0)), ("y", n(y0)), ("v_min", n(0)), ("v_max", n(1)),
+                        ("icon_min", n(first)), ("icon_max", n(first + 1)), ("lib", n(ilib)),
+                    ];
+                    shows.push(show_record(kind(SHOW_KINDS, "var_icon"), &params));
+                    let params: Params = vec![("vp", vp()), ("adj_mode", n(1)), ("return_mode", n(1)), ("step", n(1)), ("min", n(0)), ("max", n(1))];
+                    rec.set_params(kind(TOUCH_KINDS, "increment"), &params);
+                    if let Some(t) = goto.filter(|t| *t < npages) {
+                        rec.next_page = t as u16;
+                    }
+                    touch.push(rec);
+                }
                 WidgetKind::Button { goto, event, .. } => {
                     rec.pressed_page = (total + pi) as u16;
                     match goto {
@@ -336,7 +355,7 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                         None => {}
                     }
                     match event {
-                        Event::None => {}
+                        Event::None | Event::Latch { .. } => {}
                         Event::Key { key, .. } => {
                             let params: Params = vec![("vp", vp()), ("key", n(*key as u32))];
                             rec.set_params(kind(TOUCH_KINDS, "return_key"), &params);
@@ -451,8 +470,15 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                         _ => 2,
                     } as u32;
                     let first = icons.0.len() as u32;
+                    // MCU-filled list: icons carry only the row highlight; texts are drawn by the screen.
+                    let mut face = w.clone();
+                    if let WidgetKind::List { items, mcu_len, .. } = &mut face.kind {
+                        if *mcu_len > 0 {
+                            items.iter_mut().for_each(String::clear);
+                        }
+                    }
                     for s in 0..states {
-                        icons.add(&icon(&base_px, w, s as usize, (w.w, w.h), base))?;
+                        icons.add(&icon(&base_px, &face, s as usize, (w.w, w.h), base))?;
                     }
                     let last = first + states - 1;
                     if let WidgetKind::Animation { period_ms, autoplay, .. } = &w.kind {
@@ -521,9 +547,24 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                                 touch.push(r);
                             }
                         }
-                        WidgetKind::List { items, .. } => {
+                        WidgetKind::List { items, mcu_len, size, fg, .. } => {
                             // One key per row: row i sends i + 1.
                             let rh = w.h / items.len().max(1) as i32;
+                            for i in 0..items.len() as i32 {
+                                if *mcu_len == 0 {
+                                    break;
+                                }
+                                let ry = (w.y + i * rh) as u32;
+                                let ty = ry + ((rh as f32 - size) / 2.0).max(0.0) as u32;
+                                let s = *size as u32;
+                                let params: Params = vec![
+                                    ("sp", n(0xFFFF)), ("vp", n(WidgetKind::row_vp(a.unwrap().vp, *mcu_len, i as usize) as u32)),
+                                    ("x", n(x0 + 12)), ("y", n(ty)), ("color", n(rgb565(*fg))), ("box_x0", n(x0 + 12)), ("box_y0", n(ty)),
+                                    ("box_x1", n(x1)), ("box_y1", n((ry + rh as u32).min(y1))), ("length", n(*mcu_len as u32)),
+                                    ("font_w", n(s)), ("font_h", n(s)), ("encode", n(0x80)),
+                                ];
+                                shows.push(show_record(kind(SHOW_KINDS, "text"), &params));
+                            }
                             for i in 0..items.len() as i32 {
                                 let mut row = w.clone();
                                 (row.y, row.h) = (w.y + i * rh, rh);
@@ -776,6 +817,7 @@ fn describe(p: &Project, w: &Widget, a: Option<&Alloc>) -> Option<String> {
             let mut parts = vec![format!("BUTTON  \"{text}\"")];
             match event {
                 Event::None => {}
+                Event::Latch { .. } => parts.push(format!("on/off: VP {:#06x} flips 0/1 each tap and is sent; stays pressed while 1", vp())),
                 Event::Key { key, .. } => parts.push(format!("sends key {key:#06x} to VP {:#06x}", vp())),
                 Event::Adjust { target, step, min, max, wrap, .. } => parts.push(format!(
                     "adds {step:+} to '{target}' ({min}..{max}{})",
@@ -813,6 +855,10 @@ fn describe(p: &Project, w: &Widget, a: Option<&Alloc>) -> Option<String> {
         WidgetKind::Roller { items, .. } => {
             let list: Vec<_> = items.iter().enumerate().map(|(i, o)| format!("{i}={o}")).collect();
             format!("ROLLER  VP {:#06x}: {}; tap above/below the middle steps and sends it", vp(), list.join(", "))
+        }
+        WidgetKind::List { items, mcu_len, .. } if *mcu_len > 0 => {
+            let rows: Vec<_> = (0..items.len()).map(|i| format!("row {} text at {:#06x}", i + 1, WidgetKind::row_vp(vp(), *mcu_len, i))).collect();
+            format!("LIST    VP {:#06x}: 0 = none, n = row n picked (sent on tap); MCU writes {mcu_len} bytes ASCII per row: {}", vp(), rows.join(", "))
         }
         WidgetKind::List { items, .. } => {
             let list: Vec<_> = items.iter().enumerate().map(|(i, o)| format!("{}={o}", i + 1)).collect();
@@ -1035,6 +1081,20 @@ mod tests {
         assert_eq!(names, ["increment", "increment", "rtc_input"]);
         assert!(t3[1].params().unwrap().contains(&("max", Value::Num(11))));
         assert!(t3[2].params().unwrap().contains(&("kb_page", Value::Num(2))));
+
+        // On/off button: 2 icons + var_icon, increment 0..1 with wrap, no pressed page.
+        // MCU list: highlight icons + one text record per row at VP + 0x10 + i * 10.
+        let mut p4 = sample();
+        p4.pages[1].widgets = vec![Widget::new(palette("On/Off Button"), "pump", 10, 10), Widget::new(palette("MCU List"), "jobs", 10, 100)];
+        let out4 = build(&p4, Path::new(".")).unwrap();
+        let t4: Vec<_> = out4.set.touch.as_ref().unwrap().records.iter().filter(|r| r.page() == 1).collect();
+        assert_eq!(t4[0].kind().unwrap().name, "increment");
+        assert_eq!(t4[0].pressed_page, NONE);
+        assert!(t4[0].params().unwrap().contains(&("max", Value::Num(1))));
+        let shows: Vec<_> = out4.set.show.as_ref().unwrap().pages[&1].iter().map(|r| crate::control::show_params(r).unwrap()).collect();
+        let list_vp = out4.allocs.iter().find(|a| a.name == "jobs").unwrap().vp;
+        assert_eq!(shows.len(), 2 + 4, "button icon, list icon, 4 row texts");
+        assert!(shows[3].contains(&("vp", Value::Num(list_vp as u32 + 0x10 + 10))), "{:?}", shows[3]);
         // Unicode text: own .dzk of its size from library 24, records point at it.
         let mut p2 = sample();
         p2.pages[1].widgets.push(Widget::new(palette("Unicode Text"), "greet", 10, 300));
