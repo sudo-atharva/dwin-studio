@@ -13,6 +13,7 @@ pub mod render;
 pub mod set;
 pub mod show;
 pub mod sim;
+pub mod snap;
 pub mod touch;
 
 /// Big-endian u16 at `i`.

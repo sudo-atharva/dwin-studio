@@ -7,6 +7,7 @@ use dwin_studio::build::{allocate, build, Alloc, Output};
 use dwin_studio::project::{default_widgets, Event, Page, Project, Widget, WidgetKind, PRESETS};
 use dwin_studio::render::{load_image, render, Mode};
 use dwin_studio::sim::Sim;
+use dwin_studio::snap::{lines, snap_axis};
 use std::io::{Read, Write};
 use std::sync::mpsc;
 use std::time::Duration;
@@ -81,21 +82,59 @@ fn main() -> eframe::Result {
         "DWIN Studio",
         options,
         Box::new(|cc| {
-            let mut v = egui::Visuals::dark();
-            v.selection.bg_fill = Color32::from_rgb(30, 70, 130);
-            v.selection.stroke = Stroke::new(1.0, ACCENT);
-            v.panel_fill = Color32::from_rgb(37, 37, 38);
-            v.window_fill = Color32::from_rgb(45, 45, 48);
-            v.extreme_bg_color = Color32::from_rgb(30, 30, 30);
-            v.hyperlink_color = ACCENT;
-            v.widgets.hovered.weak_bg_fill = Color32::from_rgb(62, 62, 66);
-            v.widgets.inactive.weak_bg_fill = Color32::from_rgb(51, 51, 55);
-            v.window_corner_radius = egui::CornerRadius::same(6);
-            cc.egui_ctx.set_visuals(v);
+            cc.egui_ctx.set_theme(egui::ThemePreference::Dark);
+            cc.egui_ctx.style_mut_of(egui::Theme::Dark, theme);
             Ok(Box::new(App::open(path)))
         }),
     )
 }
+
+/// VS Code / EEZ-like dark theme: neutral greys, one blue accent, roomier controls.
+fn theme(s: &mut egui::Style) {
+    use egui::{CornerRadius, FontId, TextStyle};
+    let mut v = egui::Visuals::dark();
+    let r = CornerRadius::same(5);
+    v.panel_fill = Color32::from_rgb(37, 37, 38);
+    v.window_fill = Color32::from_rgb(45, 45, 48);
+    v.faint_bg_color = Color32::from_rgb(42, 42, 44);
+    v.extreme_bg_color = Color32::from_rgb(28, 28, 30);
+    v.code_bg_color = Color32::from_rgb(30, 30, 30);
+    v.hyperlink_color = ACCENT;
+    v.selection.bg_fill = Color32::from_rgb(9, 71, 113);
+    v.selection.stroke = Stroke::new(1.0, Color32::WHITE);
+    v.window_corner_radius = CornerRadius::same(8);
+    v.window_stroke = Stroke::new(1.0, Color32::from_rgb(60, 60, 64));
+    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(52, 52, 56));
+    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, Color32::from_rgb(204, 204, 204));
+    v.widgets.inactive.weak_bg_fill = Color32::from_rgb(58, 58, 62);
+    v.widgets.inactive.bg_fill = Color32::from_rgb(58, 58, 62);
+    v.widgets.inactive.fg_stroke = Stroke::new(1.0, Color32::from_rgb(220, 220, 220));
+    v.widgets.hovered.weak_bg_fill = Color32::from_rgb(72, 72, 78);
+    v.widgets.hovered.bg_stroke = Stroke::new(1.0, Color32::from_rgb(90, 90, 98));
+    v.widgets.active.weak_bg_fill = Color32::from_rgb(9, 71, 113);
+    for w in [&mut v.widgets.noninteractive, &mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open] {
+        w.corner_radius = r;
+    }
+    s.visuals = v;
+    s.spacing.item_spacing = Vec2::new(8.0, 6.0);
+    s.spacing.button_padding = Vec2::new(10.0, 4.0);
+    s.spacing.interact_size.y = 24.0;
+    s.spacing.window_margin = egui::Margin::same(10);
+    for (t, size) in [(TextStyle::Body, 13.5), (TextStyle::Button, 13.5), (TextStyle::Heading, 17.0), (TextStyle::Small, 11.0)] {
+        s.text_styles.insert(t, FontId::proportional(size));
+    }
+    s.text_styles.insert(TextStyle::Monospace, FontId::monospace(12.5));
+}
+
+/// Small rounded label on the canvas (positions, sizes).
+fn pill(painter: &egui::Painter, at: Pos2, align: egui::Align2, text: String, fill: Color32) {
+    let galley = painter.layout_no_wrap(text, egui::FontId::proportional(11.5), Color32::WHITE);
+    let r = align.anchor_size(at, galley.size() + Vec2::new(12.0, 6.0));
+    painter.rect_filled(r, 4.0, fill);
+    painter.galley(r.min + Vec2::new(6.0, 3.0), galley, Color32::WHITE);
+}
+
+const GUIDE: Color32 = Color32::from_rgb(236, 72, 153);
 
 enum Drag {
     /// Moving the selection: original rects.
@@ -128,6 +167,12 @@ struct App {
     redo: Vec<Project>,
     drag: Option<Drag>,
     show_pressed: bool,
+    show_grid: bool,
+    /// Smart guide lines shown while dragging: (x positions, y positions), project pixels.
+    guides: (Vec<i32>, Vec<i32>),
+    /// Pointer position on the screen, for the status bar.
+    cursor: Option<(i32, i32)>,
+    warn_count: usize,
     grid: i32,
     /// None = fit to window.
     zoom: Option<f32>,
@@ -160,6 +205,10 @@ impl App {
             redo: vec![],
             drag: None,
             show_pressed: false,
+            show_grid: true,
+            guides: (vec![], vec![]),
+            cursor: None,
+            warn_count: 0,
             grid: 4,
             zoom: None,
             pan: Vec2::ZERO,
@@ -519,8 +568,6 @@ impl App {
             ui.separator();
             if self.sim.is_some() {
                 self.com_controls(ui);
-                ui.separator();
-                ui.label(RichText::new(&self.status).weak());
                 return;
             }
             // Align / distribute
@@ -536,8 +583,8 @@ impl App {
             }
             ui.separator();
             ui.toggle_value(&mut self.show_pressed, "👆 Pressed");
-            ui.label("Grid");
-            ui.add(egui::DragValue::new(&mut self.grid).range(1..=64));
+            ui.toggle_value(&mut self.show_grid, "▦ Grid").on_hover_text("Show grid dots. Snapping to other widgets is always on; hold Alt to place freely");
+            ui.add(egui::DragValue::new(&mut self.grid).range(1..=64).suffix(" px"));
             let zoom_text = self.zoom.map_or("Fit".into(), |z| format!("{:.0}%", z * 100.0));
             if ui.button(zoom_text).on_hover_text("Ctrl+wheel zoom, middle-drag or wheel pans. Click = fit").clicked() {
                 (self.zoom, self.pan) = (None, Vec2::ZERO);
@@ -545,8 +592,53 @@ impl App {
             if ui.button("100%").clicked() {
                 (self.zoom, self.pan) = (Some(1.0), Vec2::ZERO);
             }
-            ui.separator();
-            ui.label(RichText::new(&self.status).weak());
+        });
+    }
+
+    /// VS Code-style status bar: mode, screen, selection | cursor, zoom, warnings, last message.
+    fn status_bar(&mut self, ui: &mut egui::Ui) {
+        let sim = self.sim.is_some();
+        let fill = if sim { Color32::from_rgb(22, 130, 70) } else { Color32::from_rgb(0, 102, 184) };
+        let frame = egui::Frame::new().fill(fill).inner_margin(egui::Margin::symmetric(10, 3));
+        egui::Panel::bottom("status").frame(frame).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.style_mut().visuals.override_text_color = Some(Color32::WHITE);
+                ui.label(RichText::new(if sim { "▶ SIMULATING" } else { "✏ EDIT" }).strong().small());
+                let page = &self.project.pages[self.page.min(self.project.pages.len() - 1)];
+                ui.label(RichText::new(format!("▣ {}", page.name)).small());
+                let sel = match &self.selected[..] {
+                    [] => String::new(),
+                    [s] => self.widgets().get(*s).map_or(String::new(), |w| format!("{}  {}, {}  {} × {}", w.name, w.x, w.y, w.w, w.h)),
+                    s => format!("{} selected", s.len()),
+                };
+                ui.label(RichText::new(sel).small());
+                ui.label(RichText::new(&self.status).small());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if self.warn_count > 0 {
+                        ui.label(RichText::new(format!("⚠ {}", self.warn_count)).small());
+                    }
+                    let zoom = self.zoom.map_or("Fit".to_string(), |z| format!("{:.0}%", z * 100.0));
+                    ui.label(RichText::new(zoom).small());
+                    ui.label(RichText::new(format!("{} × {}", self.project.width, self.project.height)).small());
+                    if let Some((x, y)) = self.cursor {
+                        ui.label(RichText::new(format!("x {x}  y {y}")).small());
+                    }
+                });
+            });
+        });
+    }
+
+    /// EEZ-style screen tabs above the canvas.
+    fn screen_tabs(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            for (i, p) in self.project.pages.iter().enumerate() {
+                let on = self.page == i;
+                let text = RichText::new(format!("▣ {}", p.name)).color(if on { Color32::WHITE } else { Color32::from_gray(160) });
+                if ui.add(egui::Button::new(text).selected(on).corner_radius(egui::CornerRadius { nw: 5, ne: 5, sw: 0, se: 0 })).clicked() {
+                    self.page = i;
+                    self.selected.clear();
+                }
+            }
         });
     }
 
@@ -1448,9 +1540,33 @@ impl App {
             self.rendered = Some(key);
         }
         let painter = ui.painter_at(area);
-        painter.rect_filled(area, 0.0, Color32::from_gray(24));
+        painter.rect_filled(area, 0.0, Color32::from_rgb(30, 30, 30));
+        // Soft shadow under the screen.
+        for (grow, alpha) in [(14.0, 18), (8.0, 30), (3.0, 60)] {
+            painter.rect_filled(rect.translate(Vec2::new(0.0, 4.0)).expand(grow), grow, Color32::from_black_alpha(alpha));
+        }
         if let Some(t) = &self.texture {
             painter.image(t.id(), rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+        }
+        if self.show_grid {
+            // Dots every grid step, thinned out so they stay at least 10 px apart on screen.
+            let mut step = self.grid.max(1) as f32;
+            while step * scale < 10.0 {
+                step *= 2.0;
+            }
+            let dot = Color32::from_white_alpha(28);
+            let (mut gx, mut gy) = (step, step);
+            while gy < ph {
+                while gx < pw {
+                    painter.rect_filled(Rect::from_center_size(rect.min + Vec2::new(gx, gy) * scale, Vec2::splat(1.5)), 0.0, dot);
+                    gx += step;
+                }
+                (gx, gy) = (step, gy + step);
+            }
+        }
+        if let Some(p) = resp.hover_pos() {
+            let q = (p - rect.min) / scale;
+            self.cursor = (rect.contains(p)).then_some((q.x as i32, q.y as i32));
         }
         let to_screen = |x: i32, y: i32| rect.min + Vec2::new(x as f32, y as f32) * scale;
         let to_proj = |p: Pos2| ((p - rect.min) / scale).to_pos2();
@@ -1499,21 +1615,54 @@ impl App {
                 }
             }
         }
+        // Snap targets: edges and centres of widgets not being dragged, plus the screen's.
+        let free = ui.input(|i| i.modifiers.alt);
+        let tol = (6.0 / scale).ceil() as i32;
+        let targets = |ws: &[Widget], skip: &[usize]| {
+            let (mut tx, mut ty) = (lines(0, pw as i32).to_vec(), lines(0, ph as i32).to_vec());
+            for (_, w) in ws.iter().enumerate().filter(|(i, _)| !skip.contains(i)) {
+                tx.extend(lines(w.x, w.w));
+                ty.extend(lines(w.y, w.h));
+            }
+            (tx, ty)
+        };
         if let (Some(d), Some(p)) = (&self.drag, resp.interact_pointer_pos()) {
             match d {
                 Drag::Move { start, orig } if resp.dragged() => {
-                    let delta = to_proj(p) - *start;
-                    let (dx, dy) = (snap(delta.x), snap(delta.y));
-                    for &(i, x, y) in orig.clone().iter() {
-                        let w = &mut self.widgets_mut()[i];
+                    let (start, orig) = (*start, orig.clone());
+                    let delta = to_proj(p) - start;
+                    let ws = &self.project.pages[self.page].widgets;
+                    let ids: Vec<usize> = orig.iter().map(|o| o.0).collect();
+                    let (tx, ty) = targets(ws, &ids);
+                    // Selection bounding box at the raw position.
+                    let l = orig.iter().map(|o| o.1).min().unwrap_or(0) + delta.x.round() as i32;
+                    let t = orig.iter().map(|o| o.2).min().unwrap_or(0) + delta.y.round() as i32;
+                    let bw = orig.iter().map(|&(i, x, _)| x + ws[i].w).max().unwrap_or(0) - orig.iter().map(|o| o.1).min().unwrap_or(0);
+                    let bh = orig.iter().map(|&(i, _, y)| y + ws[i].h).max().unwrap_or(0) - orig.iter().map(|o| o.2).min().unwrap_or(0);
+                    let sx = (!free).then(|| snap_axis(&lines(l, bw), &tx, tol)).flatten();
+                    let sy = (!free).then(|| snap_axis(&lines(t, bh), &ty, tol)).flatten();
+                    let dx = sx.as_ref().map_or(snap(delta.x), |s| delta.x.round() as i32 + s.0);
+                    let dy = sy.as_ref().map_or(snap(delta.y), |s| delta.y.round() as i32 + s.0);
+                    self.guides = (sx.map_or(vec![], |s| s.1), sy.map_or(vec![], |s| s.1));
+                    for &(i, x, y) in &orig {
+                        let w = &mut self.project.pages[self.page].widgets[i];
                         (w.x, w.y) = (x + dx, y + dy);
                     }
                 }
                 Drag::Resize { start, idx, orig } if resp.dragged() => {
                     let delta = to_proj(p) - *start;
                     let (i, (w0, h0)) = (*idx, *orig);
-                    let w = &mut self.widgets_mut()[i];
-                    (w.w, w.h) = ((w0 + snap(delta.x)).max(grid), (h0 + snap(delta.y)).max(grid));
+                    let ws = &self.project.pages[self.page].widgets;
+                    let (tx, ty) = targets(ws, &[i]);
+                    let (x, y) = (ws[i].x, ws[i].y);
+                    let (rw, rh) = (w0 + delta.x.round() as i32, h0 + delta.y.round() as i32);
+                    let sx = (!free).then(|| snap_axis(&[x + rw], &tx, tol)).flatten();
+                    let sy = (!free).then(|| snap_axis(&[y + rh], &ty, tol)).flatten();
+                    let nw = sx.as_ref().map_or(w0 + snap(delta.x), |s| rw + s.0);
+                    let nh = sy.as_ref().map_or(h0 + snap(delta.y), |s| rh + s.0);
+                    self.guides = (sx.map_or(vec![], |s| s.1), sy.map_or(vec![], |s| s.1));
+                    let w = &mut self.project.pages[self.page].widgets[i];
+                    (w.w, w.h) = (nw.max(grid), nh.max(grid));
                 }
                 Drag::Box { start } => {
                     let band = Rect::from_two_pos(*start, p);
@@ -1532,6 +1681,16 @@ impl App {
         }
         if resp.drag_stopped() {
             self.drag = None;
+            self.guides = (vec![], vec![]);
+        }
+        // Smart guides across the whole screen, Canva style.
+        for &x in &self.guides.0 {
+            let sx = rect.min.x + x as f32 * scale;
+            painter.line_segment([Pos2::new(sx, rect.min.y), Pos2::new(sx, rect.max.y)], Stroke::new(1.0, GUIDE));
+        }
+        for &y in &self.guides.1 {
+            let sy = rect.min.y + y as f32 * scale;
+            painter.line_segment([Pos2::new(rect.min.x, sy), Pos2::new(rect.max.x, sy)], Stroke::new(1.0, GUIDE));
         }
         if resp.clicked() {
             let p = resp.interact_pointer_pos().unwrap();
@@ -1551,11 +1710,21 @@ impl App {
         for &s in &self.selected {
             let w = &self.widgets()[s];
             let r = wrect(w);
-            painter.rect_stroke(r, 0.0, Stroke::new(2.0, ACCENT), StrokeKind::Outside);
+            painter.rect_stroke(r, 0.0, Stroke::new(1.5, ACCENT), StrokeKind::Outside);
             if self.selected.len() == 1 {
+                for c in [r.left_top(), r.right_top(), r.left_bottom()] {
+                    painter.rect(Rect::from_center_size(c, Vec2::splat(7.0)), 1.0, Color32::WHITE, Stroke::new(1.0, ACCENT), StrokeKind::Middle);
+                }
                 painter.rect_filled(Rect::from_center_size(r.max, Vec2::splat(HANDLE)), 2.0, ACCENT);
-                let info = format!("{}  {},{}  {}×{}", w.name, w.x, w.y, w.w, w.h);
-                painter.text(r.left_top() - Vec2::new(0.0, 3.0), egui::Align2::LEFT_BOTTOM, info, egui::FontId::proportional(11.0), ACCENT);
+                pill(&painter, r.left_top() - Vec2::new(0.0, 4.0), egui::Align2::LEFT_BOTTOM, w.name.clone(), ACCENT);
+                let live = match self.drag {
+                    Some(Drag::Resize { .. }) => Some(format!("{} × {}", w.w, w.h)),
+                    Some(Drag::Move { .. }) => Some(format!("x {}  y {}", w.x, w.y)),
+                    _ => None,
+                };
+                if let Some(t) = live {
+                    pill(&painter, r.center_bottom() + Vec2::new(0.0, 8.0), egui::Align2::CENTER_TOP, t, GUIDE);
+                }
             }
         }
         painter.rect_stroke(rect, 0.0, Stroke::new(1.0, Color32::DARK_GRAY), StrokeKind::Outside);
@@ -1747,6 +1916,7 @@ impl eframe::App for App {
         if dwin_studio::render::set_font(font.as_deref()) {
             self.rendered = None; // redraw with the new font
         }
+        self.status_bar(ui);
         if self.sim.is_some() {
             self.pump();
             egui::Panel::top("toolbar").show(ui, |ui| {
@@ -1777,7 +1947,9 @@ impl eframe::App for App {
             egui::ScrollArea::vertical().show(ui, |ui| self.inspector(ui, &allocs));
         });
         egui::Panel::bottom("map").resizable(true).default_size(150.0).show(ui, |ui| self.address_map(ui, &allocs, &warnings));
+        egui::Panel::top("tabs").show(ui, |ui| self.screen_tabs(ui));
         egui::CentralPanel::no_frame().show(ui, |ui| self.canvas(ui));
+        self.warn_count = warnings.len();
 
         // Property/page edits: one undo step per change (drags push their own at start).
         if self.drag.is_none() && self.project != before && self.undo.last() != Some(&before) {
