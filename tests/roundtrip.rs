@@ -11,7 +11,9 @@ fn sample_dirs() -> Vec<PathBuf> {
         .collect();
     dirs.push(root.join("DWIN2_Display-main/DWIN_Display_Interface/DWIN_SET"));
     dirs.retain(|d| d.is_dir());
-    assert!(!dirs.is_empty(), "no sample DWIN_SET folders found");
+    if dirs.is_empty() {
+        eprintln!("no DGUS sample folders next to the project: skipping (see README, Tests)");
+    }
     dirs
 }
 

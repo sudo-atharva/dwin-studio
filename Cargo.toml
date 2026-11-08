@@ -2,6 +2,9 @@
 name = "dwin-studio"
 version = "1.0.0"
 edition = "2024"
+description = "Visual screen editor and simulator for DWIN T5L (DGUS II) displays"
+license = "MIT"
+repository = "https://github.com/sudo-atharva/dwin-studio"
 
 [dependencies]
 ab_glyph = "0.2.32"
