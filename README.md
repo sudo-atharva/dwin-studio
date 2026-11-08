@@ -115,6 +115,18 @@ An AI agent can make one by writing that file. The fields are documented in
 
 ![Editor, light theme](docs/editor-light.png)
 
+## For AI agents
+
+There's no dedicated agent API yet; an MCP server is on the [roadmap](#roadmap). What an
+agent can do today:
+
+- **Create or edit projects:** a `.dwin` file is plain JSON. `examples/showcase/showcase.dwin`
+  uses every widget, and `examples/showcase.rs` shows how to generate one from code.
+- **Build headless:** `dwin-studio build project.dwin out_dir` writes `DWIN_SET`,
+  `ui_map.txt` and `ui_gen.h`, and prints warnings. The exit code is 1 on error.
+- **Import DGUS projects:** `dwin-studio import path/to/DWIN_SET new.dwin`
+- **Make themes:** write a JSON file into `themes/` (see [Themes](#themes)).
+
 ## Project files
 
 A project is one `.dwin` file. It's plain JSON, so it diffs well in git and can be
