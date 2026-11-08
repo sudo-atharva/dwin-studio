@@ -94,6 +94,17 @@ impl Sim {
             .collect()
     }
 
+    /// UTF-16BE text at `vp`, up to `len` bytes, ending at 0x0000 or 0xFFFF.
+    pub fn utf16_at(&self, vp: u16, len: u16) -> String {
+        let i = vp as usize * 2;
+        let units: Vec<u16> = self.mem[i..(i + len as usize).min(self.mem.len())]
+            .chunks(2)
+            .map(|c| u16::from_be_bytes([c[0], *c.get(1).unwrap_or(&0)]))
+            .take_while(|&u| u != 0 && u != 0xFFFF)
+            .collect();
+        String::from_utf16_lossy(&units)
+    }
+
     fn vp(&self, page: usize, wi: usize) -> Option<u16> {
         self.allocs.iter().find(|a| a.page == page && a.widget == wi).map(|a| a.vp)
     }
@@ -481,8 +492,10 @@ impl Sim {
                     let n = v as i16 as f64 / 10f64.powi(*dec_digits as i32);
                     text(&mut px, &format!("{n:.*}", *dec_digits as usize), x, y, hh, *color);
                 }
-                WidgetKind::Text { len, color, .. } => {
-                    let s = self.vp(self.page, wi).map_or(String::new(), |vp| self.text_at(vp, *len));
+                WidgetKind::Text { len, color, unicode, .. } => {
+                    let s = self.vp(self.page, wi).map_or(String::new(), |vp| {
+                        if *unicode { self.utf16_at(vp, *len) } else { self.text_at(vp, *len) }
+                    });
                     text(&mut px, &s, x, y, hh, *color);
                 }
                 WidgetKind::Clock { format, color } => text(&mut px, &clock(format), x, y, hh, *color),
@@ -585,6 +598,8 @@ mod tests {
             icon_lib: 48,
             font: None,
             cfg: None,
+            unicode_lib: 24,
+            unicode_max: 0x052F,
             pages: vec![
                 Page { name: "a".into(), bg: [0; 3], bg_image: None, swipe: (None, None), widgets: vec![
                     Widget::new(kind("Button"), "key", 0, 0),          // VP 0x1000, key 1

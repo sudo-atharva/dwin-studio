@@ -760,6 +760,15 @@ impl App {
                 ui.label(&a.name).on_hover_text(&w.comment);
                 ui.monospace(format!("{:#06x}", a.vp));
                 match &w.kind {
+                    WidgetKind::Text { len, unicode: true, .. } => {
+                        let mut t = sim.utf16_at(a.vp, *len);
+                        if ui.add(egui::TextEdit::singleline(&mut t).desired_width(110.0)).changed() {
+                            let units: Vec<u16> = t.encode_utf16().take(*len as usize / 2).chain([0xFFFF]).collect();
+                            for (i, u) in units.into_iter().enumerate() {
+                                sim.set(a.vp + i as u16, u);
+                            }
+                        }
+                    }
                     WidgetKind::Text { len, .. } | WidgetKind::Qr { len, .. } => {
                         let mut t = sim.text_at(a.vp, *len);
                         if ui.add(egui::TextEdit::singleline(&mut t).desired_width(110.0)).changed() {
@@ -811,6 +820,17 @@ impl App {
                     }
                 });
                 ui.end_row();
+            });
+            ui.horizontal(|ui| {
+                ui.label("Unicode fonts from");
+                ui.add(egui::DragValue::new(&mut self.project.unicode_lib).range(1..=255));
+                let ranges = [(0x052F, "Europe (Latin/Greek/Cyrillic)"), (0x06FF, "+ Arabic, Hebrew"), (0x0E7F, "+ Indic, Thai"), (0x9FFF, "+ Chinese/Japanese/Korean (big)")];
+                let cur = ranges.iter().find(|r| r.0 == self.project.unicode_max).map_or("custom", |r| r.1);
+                egui::ComboBox::from_id_salt("urange").selected_text(cur).show_ui(ui, |ui| {
+                    for (v, n) in ranges {
+                        ui.selectable_value(&mut self.project.unicode_max, v, n);
+                    }
+                });
             });
             ui.horizontal(|ui| {
                 ui.label("T5LCFG.CFG");
@@ -1124,7 +1144,7 @@ impl App {
                     ui.checkbox(smooth, "smooth (image digits)").on_hover_text("Digits drawn with this editor's font instead of the screen's built-in one");
                     ui.end_row();
                 }
-                WidgetKind::Text { len, color, input, scroll, .. } => {
+                WidgetKind::Text { len, color, input, scroll, unicode, .. } => {
                     drag_row(ui, "Max bytes", len, 1..=255);
                     color_row(ui, "Color", color);
                     ui.label("Font size");
@@ -1135,6 +1155,9 @@ impl App {
                     ui.end_row();
                     ui.label("Scroll");
                     ui.checkbox(scroll, "marquee");
+                    ui.end_row();
+                    ui.label("Language");
+                    ui.checkbox(unicode, "any language (unicode)").on_hover_text("MCU sends UTF-16. Range and font: PROJECT panel");
                     ui.end_row();
                 }
                 WidgetKind::List { items, size, fg, bg, sel, .. } => {
@@ -1585,7 +1608,7 @@ fn kind_icon(k: &WidgetKind) -> &'static str {
 const GROUPS: &[(&str, &[&str])] = &[
     ("Basic", &["Label", "Panel", "Button", "+ / − Button"]),
     ("Input", &["Number Input", "Text Input", "Toggle", "Slider", "Knob", "Dropdown", "List"]),
-    ("Display", &["Number", "Big Number", "Text", "Scrolling Text", "Lamp", "Icons", "Progress", "Gauge", "Clock", "QR Code"]),
+    ("Display", &["Number", "Big Number", "Text", "Unicode Text", "Scrolling Text", "Lamp", "Icons", "Progress", "Gauge", "Clock", "QR Code"]),
     ("Graphics", &["Chart", "Drawing", "Animation"]),
 ];
 

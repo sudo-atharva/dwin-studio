@@ -307,6 +307,7 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
     let mut show = ShowFile { flag: 0x10, max_page: (2 * total - 1) as u16, pages: BTreeMap::new() };
     let mut config = vec![0u8; 131076];
     let mut aux = AUX_START;
+    let mut unicode_fonts: BTreeMap<usize, u32> = BTreeMap::new(); // text size -> font library
 
     for (pi, page) in p.pages.iter().enumerate() {
         let has_buttons = page.widgets.iter().any(|w| matches!(w.kind, WidgetKind::Button { .. }));
@@ -394,7 +395,7 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                         touch.push(rec);
                     }
                 }
-                WidgetKind::Text { len, color, input, scroll, .. } => {
+                WidgetKind::Text { len, color, input, scroll, unicode, .. } => {
                     let size = w.h.clamp(0, 255) as u32;
                     let params: Params = vec![
                         ("sp", n(a.unwrap().sp.unwrap() as u32)), ("vp", vp()), ("x", n(x0)), ("y", n(y0)),
@@ -402,6 +403,14 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                         ("box_y1", n(y1)), ("length", n(*len as u32)), ("font_w", n(size)), ("font_h", n(size)),
                         ("encode", n(0x80)), // ASCII, auto character spacing
                     ];
+                    let mut params = params;
+                    if *unicode {
+                        // UNICODE (0x05) + auto spacing; font = the generated .dzk of this size.
+                        let next = p.unicode_lib as u32 + unicode_fonts.len() as u32;
+                        let lib = unicode_fonts.entry(size as usize).or_insert(next);
+                        params.retain(|(name, _)| *name != "encode");
+                        params.extend([("encode", n(0x85)), ("font0", n(*lib)), ("font1", n(*lib))]);
+                    }
                     if *scroll {
                         let params: Params = vec![
                             ("sp", n(a.unwrap().sp.unwrap() as u32)), ("vp", vp()), ("step", n(1)), ("color", n(rgb565(*color))),
@@ -656,6 +665,9 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
     set.raw.insert("22_Config.bin".into(), config);
     // Font 0 drawn with the editor font: numbers/text look like the preview.
     set.raw.insert("0_DWIN_ASC.HZK".into(), crate::render::ascii_hzk());
+    for (size, lib) in &unicode_fonts {
+        set.raw.insert(format!("{lib}_u{size}.dzk"), crate::render::unicode_dzk(*size, p.unicode_max));
+    }
     if let Some(cfg) = &p.cfg {
         match std::fs::read(base.join(cfg)) {
             Ok(b) => drop(set.raw.insert("T5LCFG.CFG".into(), b)),
@@ -754,9 +766,10 @@ fn describe(p: &Project, w: &Widget, a: Option<&Alloc>) -> Option<String> {
             a.and_then(|a| a.sp).unwrap_or(0),
             input.map_or(String::new(), |(lo, hi)| format!("; tap opens keypad ({lo}..{hi}), screen sends the value on OK"))
         ),
-        WidgetKind::Text { len, input, .. } => format!(
-            "TEXT    VP {:#06x} ({len} bytes ASCII), SP {:#06x}{}",
+        WidgetKind::Text { len, input, unicode, .. } => format!(
+            "TEXT    VP {:#06x} ({len} bytes {}), SP {:#06x}{}",
             vp(),
+            if *unicode { "UTF-16BE: 2 bytes per character, end with FF FF" } else { "ASCII" },
             a.and_then(|a| a.sp).unwrap_or(0),
             if *input { "; tap opens keyboard, screen sends the text on OK" } else { "" }
         ),
@@ -850,6 +863,8 @@ mod tests {
             icon_lib: 48,
             font: None,
             cfg: None,
+            unicode_lib: 24,
+            unicode_max: 0x052F,
             pages: vec![
                 Page { name: "home".into(), bg: [10, 20, 30], bg_image: None, swipe: (None, None), widgets: vec![
                     Widget::new(palette("Button"), "start", 20, 20),
@@ -971,6 +986,17 @@ mod tests {
         let rows: Vec<_> = out.set.touch.as_ref().unwrap().records.iter().filter(|r| r.page() == 1).map(|r| r.params().unwrap()).collect();
         assert_eq!(rows.len(), 4);
         assert!(rows[3].contains(&("key", Value::Num(4))));
+        // Unicode text: own .dzk of its size from library 24, records point at it.
+        let mut p2 = sample();
+        p2.pages[1].widgets.push(Widget::new(palette("Unicode Text"), "greet", 10, 300));
+        let out2 = build(&p2, Path::new(".")).unwrap();
+        let dzk = &out2.set.raw["24_u32.dzk"];
+        assert_eq!(dzk.len(), 4 * 32 * (0x052F + 1));
+        let cell = |cp: usize| &dzk[cp * 128..(cp + 1) * 128];
+        assert!(cell(0x416).iter().any(|&b| b != 0), "Cyrillic glyph drawn");
+        let rec = out2.set.show.as_ref().unwrap().pages[&1].iter().find(|r| crate::control::show_kind(r).unwrap().name == "text").unwrap();
+        let tp = crate::control::show_params(rec).unwrap();
+        assert!(tp.contains(&("encode", Value::Num(0x85))) && tp.contains(&("font1", Value::Num(24))));
         // The 3 MB ASCII font fills slots 0..11, so pages at 5 would be overwritten.
         p.page_lib = 5;
         let out = build(&p, Path::new(".")).unwrap();

@@ -30,6 +30,20 @@ pub struct Project {
     /// Not generated: a wrong byte there can blank the panel.
     #[serde(default)]
     pub cfg: Option<String>,
+    /// Unicode text fonts: one .dzk per text size, numbered from `unicode_lib`, covering
+    /// U+0000..=`unicode_max` (bigger range = bigger file; glyphs come from `font`).
+    #[serde(default = "unicode_lib")]
+    pub unicode_lib: u8,
+    #[serde(default = "unicode_max")]
+    pub unicode_max: u32,
+}
+
+fn unicode_lib() -> u8 {
+    24
+}
+
+fn unicode_max() -> u32 {
+    0x052F // Latin, Greek, Cyrillic
 }
 
 fn page_lib() -> u8 {
@@ -116,6 +130,10 @@ pub enum WidgetKind {
         /// Marquee: text scrolls inside the box.
         #[serde(default)]
         scroll: bool,
+        /// Any language: VP holds UTF-16BE (2 bytes per character) drawn with a generated
+        /// unicode font. Off = plain ASCII with the built-in font 0.
+        #[serde(default)]
+        unicode: bool,
     },
     /// On/off switch. Tapping flips VP between 0 and 1.
     /// `bit` = Some(n): flips only bit n of VP (many toggles can share one VP).
@@ -286,9 +304,10 @@ pub fn default_widgets() -> Vec<(&'static str, WidgetKind)> {
         ("Number", WidgetKind::Number { vp: None, int_digits: 3, dec_digits: 1, color: [255; 3], input: None, smooth: false }),
         ("Number Input", WidgetKind::Number { vp: None, int_digits: 3, dec_digits: 0, color: [255; 3], input: Some((0, 999)), smooth: false }),
         ("Big Number", WidgetKind::Number { vp: None, int_digits: 3, dec_digits: 0, color: [255; 3], input: None, smooth: true }),
-        ("Text", WidgetKind::Text { vp: None, len: 20, color: [255; 3], input: false, scroll: false }),
-        ("Scrolling Text", WidgetKind::Text { vp: None, len: 40, color: [255; 3], input: false, scroll: true }),
-        ("Text Input", WidgetKind::Text { vp: None, len: 20, color: [255; 3], input: true, scroll: false }),
+        ("Text", WidgetKind::Text { vp: None, len: 20, color: [255; 3], input: false, scroll: false, unicode: false }),
+        ("Scrolling Text", WidgetKind::Text { vp: None, len: 40, color: [255; 3], input: false, scroll: true, unicode: false }),
+        ("Text Input", WidgetKind::Text { vp: None, len: 20, color: [255; 3], input: true, scroll: false, unicode: false }),
+        ("Unicode Text", WidgetKind::Text { vp: None, len: 40, color: [255; 3], input: false, scroll: false, unicode: true }),
         ("Toggle", WidgetKind::Toggle { vp: None, on: [34, 197, 94], off: [71, 85, 105], knob: [255; 3], bit: None }),
         ("Lamp", WidgetKind::Lamp { vp: None, bit: None, on: [34, 197, 94], off: [51, 65, 85] }),
         ("Slider", WidgetKind::Slider { vp: None, min: 0, max: 100, track: [71, 85, 105], knob: [255; 3], show_track: true }),
@@ -323,6 +342,8 @@ impl Default for Project {
             icon_lib: icon_lib(),
             font: None,
             cfg: None,
+            unicode_lib: unicode_lib(),
+            unicode_max: unicode_max(),
             pages: vec![Page { name: "home".into(), bg: [15, 23, 42], bg_image: None, swipe: (None, None), widgets: vec![] }],
         }
     }

@@ -92,7 +92,7 @@ pub fn import(dir: &Path, project_dir: &Path) -> Result<(Project, Vec<String>), 
                 }
                 "text" => {
                     let (x0, y0) = (num(&p, "box_x0"), num(&p, "box_y0"));
-                    let kind = WidgetKind::Text { vp: Some(vp), len: num(&p, "length") as u16, color: rgb(num(&p, "color")), input: false, scroll: false };
+                    let kind = WidgetKind::Text { vp: Some(vp), len: num(&p, "length") as u16, color: rgb(num(&p, "color")), input: false, scroll: false, unicode: num(&p, "encode") & 0x7F == 5 };
                     widget(kind, format!("text_{vp:04x}"), x0, y0, num(&p, "box_x1") - x0, num(&p, "box_y1") - y0, String::new())
                 }
                 "var_icon" => {

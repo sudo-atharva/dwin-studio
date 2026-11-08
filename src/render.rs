@@ -392,6 +392,41 @@ pub fn icon(base_px: &Pixmap, w: &Widget, state: usize, size: (i32, i32), base: 
 /// DWIN ASCII font library (`0_DWIN_ASC.HZK`) drawn with the editor font, so text on the
 /// screen looks like the preview. Layout (checked against DWIN's file): sizes 4..=64, each
 /// 128 chars of `size` x `2*size` dots, rows of ceil(size/8) bytes, MSB = leftmost.
+/// Rasterise char `c` into a 1-bit cell (`w` x `h` dots, MSB first) at font height `h`,
+/// horizontally offset by `x`. Missing glyphs stay blank.
+fn glyph_cell(c: char, w: usize, h: usize, x: f32, out: &mut [u8]) {
+    let f = font();
+    let sf = f.as_scaled(PxScale::from(h as f32));
+    let id = sf.glyph_id(c);
+    if id.0 == 0 {
+        return;
+    }
+    let bpr = w.div_ceil(8);
+    if let Some(o) = f.outline_glyph(id.with_scale_and_position(h as f32, point(x, sf.ascent()))) {
+        let b = o.px_bounds();
+        o.draw(|gx, gy, cov| {
+            let (px, py) = (b.min.x as i32 + gx as i32, b.min.y as i32 + gy as i32);
+            if cov >= 0.35 && px >= 0 && py >= 0 && (px as usize) < w && (py as usize) < h {
+                out[py as usize * bpr + px as usize / 8] |= 0x80 >> (px % 8);
+            }
+        });
+    }
+}
+
+/// DWIN unicode font (`NN_name.dzk`, text encode 0x05): one `size` x `size` cell per code
+/// point from U+0000 to `max`, rows of ceil(size/8) bytes, glyphs left-aligned.
+/// Layout checked against DWIN's 16_x24.dzk.
+pub fn unicode_dzk(size: usize, max: u32) -> Vec<u8> {
+    let cell = size.div_ceil(8) * size;
+    let mut out = vec![0u8; cell * (max as usize + 1)];
+    for cp in 0x20..=max {
+        if let Some(c) = char::from_u32(cp) {
+            glyph_cell(c, size, size, 0.0, &mut out[cp as usize * cell..(cp as usize + 1) * cell]);
+        }
+    }
+    out
+}
+
 pub fn ascii_hzk() -> Vec<u8> {
     let f = font();
     let mut out = Vec::with_capacity(3_082_752);
