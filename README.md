@@ -127,7 +127,7 @@ screenshots, runs the build and taps through them in the simulator.
 {
   "mcpServers": {
     "dwin-studio": {
-      "command": "C:\path\to\DWIN Studio.exe",
+      "command": "C:/path/to/DWIN Studio.exe",
       "args": ["mcp"]
     }
   }
