@@ -9,7 +9,7 @@ use crate::control::{show_record, Kind, Params, Value, SHOW_KINDS, TOUCH_KINDS};
 use crate::icl::{Icl, Icon};
 use crate::picture;
 use crate::project::{button, Event, Page, Project, Rgb, Widget, WidgetKind};
-use crate::render::{gauge_geom, icon, needle_icon, render, to_image, Mode};
+use crate::render::{gauge_geom, icon, needle_icon, render, text, text_width, to_image, Mode};
 use crate::set::DwinSet;
 use crate::show::ShowFile;
 use crate::touch::{TouchFile, TouchRecord, NONE};
@@ -22,6 +22,8 @@ pub const SP_START: u16 = 0x9000;
 /// Icon library id for generated icons. 48 x 256 KB = 12 MB flash offset;
 /// leaves 32.icl (page images, from 8 MB) up to 4 MB.
 pub const ICON_LIB: u8 = 48;
+/// Bit icons need a private work VP each; they live here, below the SP area.
+const AUX_START: u16 = 0x8000;
 const PAGE_LIB_MAX: usize = (ICON_LIB as usize - 32) * 256 * 1024;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -64,7 +66,9 @@ pub fn allocate(p: &Project) -> (Vec<Alloc>, Vec<String>) {
                 WidgetKind::Number { .. } => (1, true, "number"),
                 WidgetKind::Text { len, .. } => (len.div_ceil(2).max(1), true, "text"),
                 WidgetKind::Button { .. } => (1, false, "button"),
+                WidgetKind::Toggle { bit: Some(_), .. } | WidgetKind::Lamp { bit: Some(_), .. } => (1, false, "bits"),
                 WidgetKind::Toggle { .. } => (1, false, "toggle"),
+                WidgetKind::Lamp { .. } => (1, false, "lamp"),
                 WidgetKind::Slider { .. } => (1, false, "slider"),
                 WidgetKind::Icons { .. } => (1, false, "icons"),
                 WidgetKind::Dropdown { .. } => (1, false, "dropdown"),
@@ -72,6 +76,7 @@ pub fn allocate(p: &Project) -> (Vec<Alloc>, Vec<String>) {
                 WidgetKind::Progress { .. } => (1, false, "progress"),
                 WidgetKind::Gauge { .. } => (1, false, "gauge"),
                 WidgetKind::Animation { .. } => (1, false, "animation"),
+                WidgetKind::Drawing { words, .. } => ((*words).max(2), false, "drawing"),
                 _ => continue,
             };
             let a = Alloc { page: pi, widget: wi, name: w.name.clone(), vp: vp.unwrap_or(0), words, sp: has_sp.then_some(0), what };
@@ -100,7 +105,8 @@ pub fn allocate(p: &Project) -> (Vec<Alloc>, Vec<String>) {
     for (i, a) in all.iter().enumerate() {
         for b in &all[i + 1..] {
             // Several key buttons on one VP is a normal DGUS pattern (one variable, many keys).
-            let shared_ok = a.what == "button" && b.what == "button" && a.vp == b.vp;
+            // So is one VP holding many bit flags.
+            let shared_ok = a.what == b.what && ["button", "bits"].contains(&a.what) && a.vp == b.vp;
             if !shared_ok && overlaps(a, b.vp, b.words) {
                 warnings.push(format!("VP clash {:#06x}: '{}' and '{}'", b.vp, a.name, b.name));
             }
@@ -169,7 +175,7 @@ fn key_page(name: &str, area: Area, cols: f32, rows: f32, g: i32, keys: &[Key]) 
     let kh = (h - g) as f32 / rows - g as f32;
     let mut panel = Widget::new(WidgetKind::Panel { color: [30, 41, 59], radius: 12.0 }, "kb", x0, y0);
     (panel.w, panel.h) = (w, h);
-    let mut page = Page { name: name.into(), bg: [0; 3], bg_image: None, widgets: vec![panel] };
+    let mut page = Page { name: name.into(), bg: [0; 3], bg_image: None, swipe: (None, None), widgets: vec![panel] };
     let mut codes = vec![None];
     for &(label, code, c, r, cs, rs) in keys {
         let x = x0 + g + (c * (kw + g as f32)) as i32;
@@ -229,7 +235,7 @@ fn keyboard(sw: i32, sh: i32) -> (Extra, Area) {
 fn menu(w: &Widget, options: &[String], size: f32, fg: Rgb, bg: Rgb, sh: i32) -> (Extra, Area) {
     let h = w.h * options.len().max(1) as i32;
     let y = if w.y + w.h + h <= sh { w.y + w.h } else { (w.y - h).max(0) };
-    let mut page = Page { name: format!("_list_{}", w.name), bg: [0; 3], bg_image: None, widgets: vec![] };
+    let mut page = Page { name: format!("_list_{}", w.name), bg: [0; 3], bg_image: None, swipe: (None, None), widgets: vec![] };
     let mut codes = vec![];
     for (i, o) in options.iter().enumerate() {
         let mut k = key_button(o, (w.x, y + i as i32 * w.h, w.w, w.h), size, bg);
@@ -286,6 +292,7 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
     let mut touch = Vec::new();
     let mut show = ShowFile { flag: 0x10, max_page: (2 * total - 1) as u16, pages: BTreeMap::new() };
     let mut config = vec![0u8; 131076];
+    let mut aux = AUX_START;
 
     for (pi, page) in p.pages.iter().enumerate() {
         let has_buttons = page.widgets.iter().any(|w| matches!(w.kind, WidgetKind::Button { .. }));
@@ -330,7 +337,7 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                     }
                     touch.push(rec);
                 }
-                WidgetKind::Number { int_digits, dec_digits, color, input, .. } => {
+                WidgetKind::Number { int_digits, dec_digits, color, input, smooth, .. } => {
                     // ASCII font: size = character width, height is twice that.
                     let font = (w.h / 2).clamp(1, 255) as u32;
                     let params: Params = vec![
@@ -338,7 +345,27 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                         ("color", n(rgb565(*color))), ("font_size", n(font)),
                         ("int_digits", n(*int_digits as u32)), ("dec_digits", n(*dec_digits as u32)),
                     ];
-                    shows.push(show_record(kind(SHOW_KINDS, "number"), &params));
+                    if *smooth {
+                        // Digits pre-rendered with the editor font: '0'..'9', '-', '.' in one row of icons.
+                        let size = w.h as f32;
+                        let cw = "0123456789-.".chars().map(|c| text_width(&c.to_string(), size).ceil() as i32).max().unwrap_or(1);
+                        let first = icons.0.len() as u32;
+                        for c in "0123456789-.".chars() {
+                            // Background cut from under the first digit.
+                            let mut px = icon(&base_px, w, 0, (cw, w.h), base);
+                            let s = c.to_string();
+                            text(&mut px, &s, (cw as f32 - text_width(&s, size)) / 2.0, 0.0, size, *color);
+                            icons.add(&px)?;
+                        }
+                        let params: Params = vec![
+                            ("sp", n(a.unwrap().sp.unwrap() as u32)), ("vp", vp()), ("x", n(x0)), ("y", n(y0)),
+                            ("icon0", n(first)), ("lib", n(ICON_LIB as u32)),
+                            ("int_digits", n(*int_digits as u32)), ("dec_digits", n(*dec_digits as u32)),
+                        ];
+                        shows.push(show_record(kind(SHOW_KINDS, "art_number"), &params));
+                    } else {
+                        shows.push(show_record(kind(SHOW_KINDS, "number"), &params));
+                    }
                     if let (Some((min, max)), Some((kp, (kx, ky, kw, kh)))) = (input, kpad) {
                         // Keypad pops up on the half of the screen away from the field.
                         let pos_x = if w.x + w.w / 2 < sw / 2 { sw - kw - 8 } else { 8 };
@@ -354,7 +381,7 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                         touch.push(rec);
                     }
                 }
-                WidgetKind::Text { len, color, input, .. } => {
+                WidgetKind::Text { len, color, input, scroll, .. } => {
                     let size = w.h.clamp(0, 255) as u32;
                     let params: Params = vec![
                         ("sp", n(a.unwrap().sp.unwrap() as u32)), ("vp", vp()), ("x", n(x0)), ("y", n(y0)),
@@ -362,7 +389,16 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                         ("box_y1", n(y1)), ("length", n(*len as u32)), ("font_w", n(size)), ("font_h", n(size)),
                         ("encode", n(0x80)), // ASCII, auto character spacing
                     ];
-                    shows.push(show_record(kind(SHOW_KINDS, "text"), &params));
+                    if *scroll {
+                        let params: Params = vec![
+                            ("sp", n(a.unwrap().sp.unwrap() as u32)), ("vp", vp()), ("step", n(1)), ("color", n(rgb565(*color))),
+                            ("x0", n(x0)), ("y0", n(y0)), ("x1", n(x1)), ("y1", n(y1)), ("font_w", n(size)), ("font_h", n(size)),
+                            ("speed", n(2)),
+                        ];
+                        shows.push(show_record(kind(SHOW_KINDS, "scroll_text"), &params));
+                    } else {
+                        shows.push(show_record(kind(SHOW_KINDS, "text"), &params));
+                    }
                     if let (true, Some((kp, (kx, ky, kw, kh)))) = (*input, kbd) {
                         // Keyboard sits at the bottom unless the field is there; then at the top.
                         let pos_y = if w.y + w.h / 2 > sh / 2 { 8 } else { ky };
@@ -378,7 +414,7 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                         touch.push(rec);
                     }
                 }
-                WidgetKind::Toggle { .. } | WidgetKind::Icons { .. } | WidgetKind::Dropdown { .. } | WidgetKind::Animation { .. } => {
+                WidgetKind::Toggle { .. } | WidgetKind::Lamp { .. } | WidgetKind::Icons { .. } | WidgetKind::Dropdown { .. } | WidgetKind::Animation { .. } => {
                     let states = match &w.kind {
                         WidgetKind::Icons { images, .. } | WidgetKind::Animation { images, .. } => images.len().max(1),
                         WidgetKind::Dropdown { options, .. } => options.len().max(1),
@@ -400,6 +436,26 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                         if *autoplay {
                             let i = a.unwrap().vp as usize * 2;
                             config[i..i + 2].copy_from_slice(&1u16.to_be_bytes());
+                        }
+                        continue;
+                    }
+                    let bit = match &w.kind {
+                        WidgetKind::Toggle { bit, .. } | WidgetKind::Lamp { bit, .. } => *bit,
+                        _ => None,
+                    };
+                    if let Some(b) = bit {
+                        // One bit of the VP picks icon `first` (0) or `last` (1).
+                        let params: Params = vec![
+                            ("sp", n(0xFFFF)), ("vp", vp()), ("vp_aux", n(aux as u32)), ("bits", n(1 << (b % 16))),
+                            ("lib", n(ICON_LIB as u32)), ("icon0_start", n(first)), ("icon0_end", n(first)),
+                            ("icon1_start", n(last)), ("icon1_end", n(last)), ("x", n(x0)), ("y", n(y0)),
+                        ];
+                        aux += 2;
+                        shows.push(show_record(kind(SHOW_KINDS, "bit_icon"), &params));
+                        if matches!(w.kind, WidgetKind::Toggle { .. }) {
+                            let params: Params = vec![("vp", vp()), ("bit", n((b % 16) as u32)), ("adj_mode", n(2))];
+                            rec.set_params(kind(TOUCH_KINDS, "bit_button"), &params);
+                            touch.push(rec);
                         }
                         continue;
                     }
@@ -454,6 +510,12 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                     rec.set_params(kind(TOUCH_KINDS, "slider"), &params);
                     touch.push(rec);
                 }
+                WidgetKind::Drawing { .. } => {
+                    let params: Params = vec![
+                        ("sp", n(0xFFFF)), ("vp", vp()), ("x0", n(x0)), ("y0", n(y0)), ("x1", n(x1)), ("y1", n(y1)),
+                    ];
+                    shows.push(show_record(kind(SHOW_KINDS, "graphics"), &params));
+                }
                 WidgetKind::Clock { format, color } => {
                     let params: Params = vec![
                         ("sp", n(0xFFFF)), ("x", n(x0)), ("y", n(y0)), ("color", n(rgb565(*color))),
@@ -503,6 +565,20 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                 WidgetKind::Label { .. } | WidgetKind::Panel { .. } | WidgetKind::Image { .. } => {}
             }
         }
+        // Swipe goes last so buttons keep their taps.
+        if let (None, None) = page.swipe {
+            continue;
+        }
+        let target = |t: Option<usize>| n(t.filter(|&t| t < npages).unwrap_or(pi) as u32);
+        let mut rec = TouchRecord {
+            page_raw: pi as u16, x0: 0, y0: 0, x1: p.width - 1, y1: p.height - 1, next_page: NONE, pressed_page: NONE, code: 0, ext: vec![],
+        };
+        let params: Params = vec![
+            ("prev", target(page.swipe.0)), ("next", target(page.swipe.1)), ("range0", n(0)), ("range1", n(p.height as u32 - 1)),
+            ("speed", n(25)), ("dist", n(50)),
+        ];
+        rec.set_params(kind(TOUCH_KINDS, "swipe_page"), &params);
+        touch.push(rec);
     }
 
     for (k, e) in extras.iter().enumerate() {
@@ -618,7 +694,10 @@ fn describe(p: &Project, w: &Widget, a: Option<&Alloc>) -> Option<String> {
             a.and_then(|a| a.sp).unwrap_or(0),
             if *input { "; tap opens keyboard, screen sends the text on OK" } else { "" }
         ),
+        WidgetKind::Toggle { bit: Some(b), .. } => format!("TOGGLE  VP {:#06x} bit {b}; tap flips the bit and sends the VP", vp()),
         WidgetKind::Toggle { .. } => format!("TOGGLE  VP {:#06x} = 0 off / 1 on; tap flips it and sends it", vp()),
+        WidgetKind::Lamp { bit: Some(b), .. } => format!("LAMP    VP {:#06x} bit {b}: 1 = on", vp()),
+        WidgetKind::Lamp { .. } => format!("LAMP    VP {:#06x}: 0 off / 1 on", vp()),
         WidgetKind::Slider { min, max, .. } => format!("SLIDER  VP {:#06x} = {min}..{max}; drag sends it, MCU write moves knob", vp()),
         WidgetKind::Icons { images, .. } => format!("ICONS   VP {:#06x} = 0..{} picks the picture", vp(), images.len().max(1) - 1),
         WidgetKind::Dropdown { options, .. } => {
@@ -632,6 +711,10 @@ fn describe(p: &Project, w: &Widget, a: Option<&Alloc>) -> Option<String> {
         WidgetKind::Progress { min, max, .. } => format!("PROGRESS VP {:#06x} = {min}..{max}", vp()),
         WidgetKind::Chart { channel, min, max, .. } => format!(
             "CHART   channel {channel}, {min}..{max}; add samples: 5A A5 <len> 82 03 10 5A A5 01 00 {channel:02X} <count> <int16 samples> (check your T5L manual)"
+        ),
+        WidgetKind::Drawing { words, .. } => format!(
+            "DRAWING VP {:#06x} ({words} words): MCU writes basic-graphics commands here (T5L manual: 0x0002 lines, 0x0003 boxes, 0x0004 filled boxes...), 0x0000 ends",
+            vp()
         ),
         WidgetKind::Gauge { min, max, .. } => format!("GAUGE   VP {:#06x} = {min}..{max} turns the needle", vp()),
         WidgetKind::Animation { autoplay, .. } => format!(
@@ -690,7 +773,7 @@ mod tests {
             width: 1024,
             height: 600,
             pages: vec![
-                Page { name: "home".into(), bg: [10, 20, 30], bg_image: None, widgets: vec![
+                Page { name: "home".into(), bg: [10, 20, 30], bg_image: None, swipe: (None, None), widgets: vec![
                     Widget::new(palette("Button"), "start", 20, 20),
                     Widget::new(goto, "settings", 20, 100),
                     Widget::new(palette("Number"), "temp", 300, 20),
@@ -699,7 +782,7 @@ mod tests {
                     Widget::new(palette("Slider"), "current", 300, 300),
                     Widget::new(plus, "temp_up", 500, 20),
                 ]},
-                Page { name: "settings".into(), bg: [0, 0, 0], bg_image: None, widgets: vec![] },
+                Page { name: "settings".into(), bg: [0, 0, 0], bg_image: None, swipe: (None, None), widgets: vec![] },
             ],
         }
     }
@@ -760,6 +843,37 @@ mod tests {
         let shows: Vec<_> = out.set.show.as_ref().unwrap().pages[&1].iter().map(|r| crate::control::show_kind(r).unwrap().name).collect();
         assert_eq!(shows, ["number", "text", "var_icon", "rtc_text", "qr_code", "progress_bar", "curve", "icon_rotate"]);
         assert!(out.map.contains("DROPDOWN") && out.map.contains("_keypad"), "{}", out.map);
+    }
+
+    #[test]
+    fn bits_swipe_scroll_smooth() {
+        let mut p = sample();
+        p.pages[1].swipe = (Some(0), None);
+        let mut t = palette("Toggle");
+        if let WidgetKind::Toggle { bit, vp, .. } = &mut t {
+            (*bit, *vp) = (Some(3), Some(0x2000));
+        }
+        let mut lamp = palette("Lamp");
+        if let WidgetKind::Lamp { bit, vp, .. } = &mut lamp {
+            (*bit, *vp) = (Some(4), Some(0x2000));
+        }
+        let ws = &mut p.pages[1].widgets;
+        ws.push(Widget::new(t, "flag3", 10, 10));
+        ws.push(Widget::new(lamp, "flag4", 100, 10));
+        ws.push(Widget::new(palette("Scrolling Text"), "ticker", 10, 100));
+        ws.push(Widget::new(palette("Big Number"), "big", 10, 200));
+        let out = build(&p, Path::new(".")).unwrap();
+        assert!(out.warnings.is_empty(), "shared bit VP is fine: {:?}", out.warnings);
+        let t = &out.set.touch.as_ref().unwrap().records;
+        let kinds: Vec<_> = t.iter().filter(|r| r.page() == 1).map(|r| r.kind().map_or("basic", |k| k.name)).collect();
+        assert_eq!(kinds, ["bit_button", "swipe_page"]);
+        let bb = t.iter().find(|r| r.page() == 1).unwrap();
+        assert_eq!(bb.code, 0xFE0D);
+        assert!(bb.params().unwrap().contains(&("bit", Value::Num(3))));
+        let shows: Vec<_> = out.set.show.as_ref().unwrap().pages[&1].iter().map(|r| crate::control::show_kind(r).unwrap().name).collect();
+        assert_eq!(shows, ["bit_icon", "bit_icon", "scroll_text", "art_number"]);
+        // toggle(2) + slider(1) on home, then 2 + 2 bit icons, then 12 digits.
+        assert_eq!(out.set.icls["48.icl"].icons.len(), 3 + 4 + 12);
     }
 
     #[test]

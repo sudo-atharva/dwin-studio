@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 const HANDLE: f32 = 10.0;
-const ACCENT: Color32 = Color32::from_rgb(250, 180, 40);
+const ACCENT: Color32 = Color32::from_rgb(56, 139, 253);
 const IMAGE_EXT: &[&str] = &["png", "jpg", "jpeg", "bmp"];
 
 /// Write DWIN_SET, ui_gen.h and ui_map.txt into `dir`.
@@ -62,8 +62,15 @@ fn main() -> eframe::Result {
         options,
         Box::new(|cc| {
             let mut v = egui::Visuals::dark();
-            v.selection.bg_fill = Color32::from_rgb(120, 85, 20);
+            v.selection.bg_fill = Color32::from_rgb(30, 70, 130);
             v.selection.stroke = Stroke::new(1.0, ACCENT);
+            v.panel_fill = Color32::from_rgb(37, 37, 38);
+            v.window_fill = Color32::from_rgb(45, 45, 48);
+            v.extreme_bg_color = Color32::from_rgb(30, 30, 30);
+            v.hyperlink_color = ACCENT;
+            v.widgets.hovered.weak_bg_fill = Color32::from_rgb(62, 62, 66);
+            v.widgets.inactive.weak_bg_fill = Color32::from_rgb(51, 51, 55);
+            v.window_corner_radius = egui::CornerRadius::same(6);
             cc.egui_ctx.set_visuals(v);
             Ok(Box::new(App::open(path)))
         }),
@@ -446,7 +453,7 @@ impl App {
                 self.start_sim();
             }
             ui.separator();
-            let build = egui::Button::new(RichText::new("▶ Build").strong().color(Color32::BLACK)).fill(ACCENT);
+            let build = egui::Button::new(RichText::new("⚙ Build").strong().color(Color32::WHITE)).fill(ACCENT);
             if ui.add(build).on_hover_text("Write DWIN_SET, ui_gen.h, ui_map.txt").clicked() {
                 self.do_build();
             }
@@ -581,7 +588,8 @@ impl App {
             }
         }
         if up {
-            sim.release(&self.project);
+            let x = pos.map_or(0, |p| to_proj(p).x as i32);
+            sim.release(&self.project, x);
         }
 
         let px = sim.render(&self.project, &base);
@@ -605,7 +613,7 @@ impl App {
         let green = Color32::from_rgb(34, 197, 94);
         painter.rect_stroke(rect, 0.0, Stroke::new(2.0, green), StrokeKind::Outside);
         let label = format!("SIMULATING  page {}: {}", sim.page, page.name);
-        painter.text(rect.left_top() - Vec2::new(0.0, 4.0), egui::Align2::LEFT_BOTTOM, label, egui::FontId::proportional(12.0), green);
+        painter.text(area.left_top() + Vec2::new(8.0, 6.0), egui::Align2::LEFT_TOP, label, egui::FontId::proportional(12.0), green);
         ui.ctx().request_repaint_after(Duration::from_millis(50)); // clock, animations
     }
 
@@ -789,7 +797,7 @@ impl App {
                 if ui.button("+ Screen").clicked() {
                     let n = self.project.pages.len();
                     let bg = self.project.pages[self.page].bg;
-                    self.project.pages.push(Page { name: format!("screen{n}"), bg, bg_image: None, widgets: vec![] });
+                    self.project.pages.push(Page { name: format!("screen{n}"), bg, bg_image: None, swipe: (None, None), widgets: vec![] });
                     self.page = n;
                     self.selected.clear();
                 }
@@ -817,24 +825,7 @@ impl App {
             let mut pick = None;
             // Top of list = front-most, like LVGL editors.
             for (i, w) in self.widgets().iter().enumerate().rev() {
-                let icon = match w.kind {
-                    WidgetKind::Button { .. } => "⏺",
-                    WidgetKind::Label { .. } => "🗛",
-                    WidgetKind::Panel { .. } => "▭",
-                    WidgetKind::Image { .. } => "🖼",
-                    WidgetKind::Number { .. } => "#",
-                    WidgetKind::Text { .. } => "¶",
-                    WidgetKind::Toggle { .. } => "◑",
-                    WidgetKind::Slider { .. } => "━",
-                    WidgetKind::Icons { .. } => "◈",
-                    WidgetKind::Dropdown { .. } => "▾",
-                    WidgetKind::Clock { .. } => "🕓",
-                    WidgetKind::Qr { .. } => "▦",
-                    WidgetKind::Progress { .. } => "▬",
-                    WidgetKind::Chart { .. } => "📈",
-                    WidgetKind::Gauge { .. } => "◔",
-                    WidgetKind::Animation { .. } => "🎞",
-                };
+                let icon = kind_icon(&w.kind);
                 let r = ui.selectable_label(self.selected.contains(&i), format!("{icon} {}", w.name));
                 let r = if w.comment.is_empty() { r } else { r.on_hover_text(&w.comment) };
                 if r.clicked() {
@@ -867,19 +858,29 @@ impl App {
             }
         });
 
-        CollapsingHeader::new("WIDGETS").default_open(true).show(ui, |ui| {
-            egui::Grid::new("palette").num_columns(2).spacing([6.0, 6.0]).show(ui, |ui| {
-                for (i, (name, kind)) in default_widgets().into_iter().enumerate() {
-                    if ui.add_sized([100.0, 26.0], egui::Button::new(name)).clicked() {
-                        let (cx, cy) = (self.project.width as i32 / 2 - 60, self.project.height as i32 / 2 - 30);
-                        self.add_widget(Widget::new(kind, "", cx, cy));
+        let all = default_widgets();
+        let known: Vec<&str> = GROUPS.iter().flat_map(|g| g.1.iter().copied()).collect();
+        let more: Vec<&str> = all.iter().map(|(n, _)| *n).filter(|n| !known.contains(n)).collect();
+        for (group, names) in GROUPS.iter().copied().chain([("More", &more[..])]) {
+            if names.is_empty() {
+                continue;
+            }
+            CollapsingHeader::new(group.to_uppercase()).id_salt(group).default_open(true).show(ui, |ui| {
+                egui::Grid::new(group).num_columns(2).spacing([6.0, 6.0]).show(ui, |ui| {
+                    for (i, name) in names.iter().enumerate() {
+                        let Some((_, kind)) = all.iter().find(|(n, _)| n == name) else { continue };
+                        let label = format!("{} {name}", kind_icon(kind));
+                        if ui.add_sized([108.0, 26.0], egui::Button::new(label)).clicked() {
+                            let (cx, cy) = (self.project.width as i32 / 2 - 60, self.project.height as i32 / 2 - 30);
+                            self.add_widget(Widget::new(kind.clone(), "", cx, cy));
+                        }
+                        if i % 2 == 1 {
+                            ui.end_row();
+                        }
                     }
-                    if i % 2 == 1 {
-                        ui.end_row();
-                    }
-                }
+                });
             });
-        });
+        }
 
         CollapsingHeader::new("ASSETS").default_open(true).show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -940,6 +941,7 @@ impl App {
                 ui.label(format!("{} widgets selected - use the align buttons in the toolbar", self.selected.len()));
                 return;
             }
+            let names: Vec<String> = self.project.pages.iter().map(|p| p.name.clone()).collect();
             let page = &mut self.project.pages[self.page];
             CollapsingHeader::new("SCREEN").default_open(true).show(ui, |ui| {
                 egui::Grid::new("screen").num_columns(2).show(ui, |ui| {
@@ -948,6 +950,17 @@ impl App {
                     ui.label("Picture");
                     asset_pick(ui, "bgimg", &mut page.bg_image, &assets);
                     ui.end_row();
+                    for (label, t, id) in [("Swipe right →", &mut page.swipe.0, "swl"), ("Swipe left →", &mut page.swipe.1, "swr")] {
+                        ui.label(label);
+                        let text = t.and_then(|i| names.get(i)).map_or("(none)".to_string(), |n| n.clone());
+                        egui::ComboBox::from_id_salt(id).selected_text(text).show_ui(ui, |ui| {
+                            ui.selectable_value(t, None, "(none)");
+                            for (i, n) in names.iter().enumerate() {
+                                ui.selectable_value(t, Some(i), format!("{i}: {n}"));
+                            }
+                        });
+                        ui.end_row();
+                    }
                 });
             });
             ui.label(RichText::new("Select a widget to edit it").weak());
@@ -1017,7 +1030,7 @@ impl App {
                         radius_row(ui, radius);
                     }
                 }
-                WidgetKind::Number { int_digits, dec_digits, color, input, .. } => {
+                WidgetKind::Number { int_digits, dec_digits, color, input, smooth, .. } => {
                     drag_row(ui, "Integer digits", int_digits, 1..=10);
                     drag_row(ui, "Decimals", dec_digits, 0..=5);
                     color_row(ui, "Color", color);
@@ -1034,8 +1047,11 @@ impl App {
                         drag_row(ui, "Min", lo, -32768..=32767);
                         drag_row(ui, "Max", hi, -32768..=32767);
                     }
+                    ui.label("Font");
+                    ui.checkbox(smooth, "smooth (image digits)").on_hover_text("Digits drawn with this editor's font instead of the screen's built-in one");
+                    ui.end_row();
                 }
-                WidgetKind::Text { len, color, input, .. } => {
+                WidgetKind::Text { len, color, input, scroll, .. } => {
                     drag_row(ui, "Max bytes", len, 1..=255);
                     color_row(ui, "Color", color);
                     ui.label("Font size");
@@ -1043,6 +1059,9 @@ impl App {
                     ui.end_row();
                     ui.label("Tap to edit");
                     ui.checkbox(input, "keyboard");
+                    ui.end_row();
+                    ui.label("Scroll");
+                    ui.checkbox(scroll, "marquee");
                     ui.end_row();
                 }
                 WidgetKind::Dropdown { options, size, fg, bg, .. } => {
@@ -1092,6 +1111,10 @@ impl App {
                     color_row(ui, "Needle", needle);
                     color_row(ui, "Dial", dial);
                 }
+                WidgetKind::Drawing { words, bg, .. } => {
+                    drag_row(ui, "Command buffer (words)", words, 8..=4096);
+                    color_row(ui, "Background", bg);
+                }
                 WidgetKind::Animation { images, period_ms, autoplay, .. } => {
                     drag_row(ui, "Frame time (ms)", period_ms, 8..=2000);
                     ui.label("Start");
@@ -1099,10 +1122,16 @@ impl App {
                     ui.end_row();
                     image_list(ui, images, &assets);
                 }
-                WidgetKind::Toggle { on, off, knob, .. } => {
+                WidgetKind::Toggle { on, off, knob, bit, .. } => {
                     color_row(ui, "On", on);
                     color_row(ui, "Off", off);
                     color_row(ui, "Knob", knob);
+                    bit_row(ui, bit);
+                }
+                WidgetKind::Lamp { on, off, bit, .. } => {
+                    color_row(ui, "On", on);
+                    color_row(ui, "Off", off);
+                    bit_row(ui, bit);
                 }
                 WidgetKind::Slider { min, max, track, knob, .. } => {
                     drag_row(ui, "Min", min, 0..=65535);
@@ -1311,7 +1340,7 @@ impl App {
                 }
                 Drag::Box { start } => {
                     let band = Rect::from_two_pos(*start, p);
-                    painter.rect(band, 0.0, Color32::from_rgba_unmultiplied(250, 180, 40, 25), Stroke::new(1.0, ACCENT), StrokeKind::Inside);
+                    painter.rect(band, 0.0, Color32::from_rgba_unmultiplied(56, 139, 253, 25), Stroke::new(1.0, ACCENT), StrokeKind::Inside);
                     if resp.drag_stopped() {
                         let hits: Vec<usize> = self.widgets().iter().enumerate().filter(|(_, w)| band.intersects(wrect(w))).map(|(i, _)| i).collect();
                         for i in hits {
@@ -1427,6 +1456,52 @@ fn asset_pick(ui: &mut egui::Ui, id: &str, v: &mut Option<String>, assets: &[Str
             ui.label("Import images in ASSETS first");
         }
     });
+}
+
+fn kind_icon(k: &WidgetKind) -> &'static str {
+    match k {
+        WidgetKind::Button { .. } => "⏺",
+        WidgetKind::Label { .. } => "A",
+        WidgetKind::Panel { .. } => "▭",
+        WidgetKind::Image { .. } => "▣",
+        WidgetKind::Number { .. } => "#",
+        WidgetKind::Text { .. } => "¶",
+        WidgetKind::Toggle { .. } => "◑",
+        WidgetKind::Lamp { .. } => "●",
+        WidgetKind::Slider { .. } => "━",
+        WidgetKind::Icons { .. } => "◈",
+        WidgetKind::Dropdown { .. } => "▾",
+        WidgetKind::Clock { .. } => "◷",
+        WidgetKind::Qr { .. } => "▦",
+        WidgetKind::Progress { .. } => "▬",
+        WidgetKind::Chart { .. } => "∿",
+        WidgetKind::Gauge { .. } => "◔",
+        WidgetKind::Animation { .. } => "▶",
+        WidgetKind::Drawing { .. } => "✎",
+    }
+}
+
+/// Palette groups, EEZ-style. Names match `default_widgets()`; anything new lands in "More".
+const GROUPS: &[(&str, &[&str])] = &[
+    ("Basic", &["Label", "Panel", "Button", "+ / − Button"]),
+    ("Input", &["Number Input", "Text Input", "Toggle", "Slider", "Dropdown"]),
+    ("Display", &["Number", "Big Number", "Text", "Scrolling Text", "Lamp", "Icons", "Progress", "Gauge", "Clock", "QR Code"]),
+    ("Graphics", &["Chart", "Drawing", "Animation"]),
+];
+
+/// "Use one bit of the VP" option (bit flags packed in one word).
+fn bit_row(ui: &mut egui::Ui, bit: &mut Option<u8>) {
+    ui.label("Bit");
+    ui.horizontal(|ui| {
+        let mut on = bit.is_some();
+        if ui.checkbox(&mut on, "one bit of VP").changed() {
+            *bit = on.then_some(0);
+        }
+        if let Some(b) = bit {
+            ui.add(egui::DragValue::new(b).range(0..=15));
+        }
+    });
+    ui.end_row();
 }
 
 /// Ordered picture list (grid rows): index, name, move up, remove, then an add picker.

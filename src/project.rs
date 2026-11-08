@@ -25,6 +25,9 @@ pub struct Page {
     /// Background picture, stretched to the screen (drawn over `bg`).
     #[serde(default)]
     pub bg_image: Option<String>,
+    /// Pages a finger swipe goes to: (swipe right = previous, swipe left = next).
+    #[serde(default)]
+    pub swipe: (Option<usize>, Option<usize>),
     pub widgets: Vec<Widget>,
 }
 
@@ -73,6 +76,10 @@ pub enum WidgetKind {
         color: Rgb,
         #[serde(default)]
         input: Option<(i32, i32)>,
+        /// Draw digits with the editor's smooth font (pre-rendered digit icons) instead of
+        /// the screen's built-in bitmap font.
+        #[serde(default)]
+        smooth: bool,
     },
     /// Text shown by the screen from a VP (ASCII, `len` bytes). `input`: tap opens a keyboard.
     Text {
@@ -81,9 +88,22 @@ pub enum WidgetKind {
         color: Rgb,
         #[serde(default)]
         input: bool,
+        /// Marquee: text scrolls inside the box.
+        #[serde(default)]
+        scroll: bool,
     },
     /// On/off switch. Tapping flips VP between 0 and 1.
-    Toggle { vp: Option<u16>, on: Rgb, off: Rgb, knob: Rgb },
+    /// `bit` = Some(n): flips only bit n of VP (many toggles can share one VP).
+    Toggle {
+        vp: Option<u16>,
+        on: Rgb,
+        off: Rgb,
+        knob: Rgb,
+        #[serde(default)]
+        bit: Option<u8>,
+    },
+    /// Status light: on when VP (or bit `bit` of VP) is set.
+    Lamp { vp: Option<u16>, bit: Option<u8>, on: Rgb, off: Rgb },
     /// Horizontal slider. Dragging writes min..max to VP; MCU writes move the knob.
     Slider { vp: Option<u16>, min: u16, max: u16, track: Rgb, knob: Rgb },
     /// Shows `images[v]` for VP value v (status lights, battery, modes...).
@@ -100,6 +120,9 @@ pub enum WidgetKind {
     Chart { channel: u8, min: i16, max: i16, step: u8, color: Rgb, bg: Rgb },
     /// Dial with a needle rotated by VP between min and max over `sweep` degrees.
     Gauge { vp: Option<u16>, min: u16, max: u16, sweep: u16, needle: Rgb, dial: Rgb },
+    /// Area the MCU draws into with DGUS basic-graphics commands (lines, boxes, dots)
+    /// written to a `words`-long buffer at VP.
+    Drawing { vp: Option<u16>, words: u16, bg: Rgb },
     /// Frames played in a loop while VP = 1 (stops on 0). `autoplay` sets VP = 1 at boot.
     Animation { vp: Option<u16>, images: Vec<String>, period_ms: u16, autoplay: bool },
 }
@@ -121,13 +144,15 @@ impl WidgetKind {
             | WidgetKind::Number { vp, .. }
             | WidgetKind::Text { vp, .. }
             | WidgetKind::Toggle { vp, .. }
+            | WidgetKind::Lamp { vp, .. }
             | WidgetKind::Slider { vp, .. }
             | WidgetKind::Icons { vp, .. }
             | WidgetKind::Dropdown { vp, .. }
             | WidgetKind::Qr { vp, .. }
             | WidgetKind::Progress { vp, .. }
             | WidgetKind::Gauge { vp, .. }
-            | WidgetKind::Animation { vp, .. } => Some(vp),
+            | WidgetKind::Animation { vp, .. }
+            | WidgetKind::Drawing { vp, .. } => Some(vp),
             _ => None,
         }
     }
@@ -147,6 +172,7 @@ impl Widget {
             WidgetKind::Number { .. } => (120, 40),
             WidgetKind::Text { .. } => (200, 32),
             WidgetKind::Toggle { .. } => (80, 40),
+            WidgetKind::Lamp { .. } => (32, 32),
             WidgetKind::Slider { .. } => (300, 40),
             WidgetKind::Icons { .. } => (64, 64),
             WidgetKind::Dropdown { .. } => (200, 44),
@@ -156,6 +182,7 @@ impl Widget {
             WidgetKind::Chart { .. } => (360, 180),
             WidgetKind::Gauge { .. } => (200, 200),
             WidgetKind::Animation { .. } => (64, 64),
+            WidgetKind::Drawing { .. } => (300, 200),
         };
         Self { name: name.into(), x, y, w, h, comment: String::new(), kind }
     }
@@ -169,6 +196,7 @@ impl Widget {
             WidgetKind::Number { .. } => "Number",
             WidgetKind::Text { .. } => "Text",
             WidgetKind::Toggle { .. } => "Toggle",
+            WidgetKind::Lamp { .. } => "Lamp",
             WidgetKind::Slider { .. } => "Slider",
             WidgetKind::Icons { .. } => "Icons",
             WidgetKind::Dropdown { .. } => "Dropdown",
@@ -178,6 +206,7 @@ impl Widget {
             WidgetKind::Chart { .. } => "Chart",
             WidgetKind::Gauge { .. } => "Gauge",
             WidgetKind::Animation { .. } => "Animation",
+            WidgetKind::Drawing { .. } => "Drawing",
         }
     }
 
@@ -200,11 +229,14 @@ pub fn default_widgets() -> Vec<(&'static str, WidgetKind)> {
         ("+ / − Button", button("+", Event::Adjust { target: String::new(), step: 1, min: 0, max: 100, wrap: false, repeat: true })),
         ("Label", WidgetKind::Label { text: "Label".into(), size: 24.0, color: [255; 3] }),
         ("Panel", WidgetKind::Panel { color: [30, 41, 59], radius: 12.0 }),
-        ("Number", WidgetKind::Number { vp: None, int_digits: 3, dec_digits: 1, color: [255; 3], input: None }),
-        ("Number Input", WidgetKind::Number { vp: None, int_digits: 3, dec_digits: 0, color: [255; 3], input: Some((0, 999)) }),
-        ("Text", WidgetKind::Text { vp: None, len: 20, color: [255; 3], input: false }),
-        ("Text Input", WidgetKind::Text { vp: None, len: 20, color: [255; 3], input: true }),
-        ("Toggle", WidgetKind::Toggle { vp: None, on: [34, 197, 94], off: [71, 85, 105], knob: [255; 3] }),
+        ("Number", WidgetKind::Number { vp: None, int_digits: 3, dec_digits: 1, color: [255; 3], input: None, smooth: false }),
+        ("Number Input", WidgetKind::Number { vp: None, int_digits: 3, dec_digits: 0, color: [255; 3], input: Some((0, 999)), smooth: false }),
+        ("Big Number", WidgetKind::Number { vp: None, int_digits: 3, dec_digits: 0, color: [255; 3], input: None, smooth: true }),
+        ("Text", WidgetKind::Text { vp: None, len: 20, color: [255; 3], input: false, scroll: false }),
+        ("Scrolling Text", WidgetKind::Text { vp: None, len: 40, color: [255; 3], input: false, scroll: true }),
+        ("Text Input", WidgetKind::Text { vp: None, len: 20, color: [255; 3], input: true, scroll: false }),
+        ("Toggle", WidgetKind::Toggle { vp: None, on: [34, 197, 94], off: [71, 85, 105], knob: [255; 3], bit: None }),
+        ("Lamp", WidgetKind::Lamp { vp: None, bit: None, on: [34, 197, 94], off: [51, 65, 85] }),
         ("Slider", WidgetKind::Slider { vp: None, min: 0, max: 100, track: [71, 85, 105], knob: [255; 3] }),
         ("Icons", WidgetKind::Icons { vp: None, images: vec![] }),
         ("Dropdown", WidgetKind::Dropdown {
@@ -218,6 +250,7 @@ pub fn default_widgets() -> Vec<(&'static str, WidgetKind)> {
         ("Chart", WidgetKind::Chart { channel: 0, min: 0, max: 100, step: 2, color: [56, 189, 248], bg: [2, 6, 23] }),
         ("Clock", WidgetKind::Clock { format: "Y-M-D H:Q:S".into(), color: [255; 3] }),
         ("QR Code", WidgetKind::Qr { vp: None, len: 64, dot: 4 }),
+        ("Drawing", WidgetKind::Drawing { vp: None, words: 256, bg: [2, 6, 23] }),
         ("Animation", WidgetKind::Animation { vp: None, images: vec![], period_ms: 200, autoplay: true }),
     ]
 }
@@ -227,7 +260,7 @@ impl Default for Project {
         Self {
             width: 800,
             height: 480,
-            pages: vec![Page { name: "home".into(), bg: [15, 23, 42], bg_image: None, widgets: vec![] }],
+            pages: vec![Page { name: "home".into(), bg: [15, 23, 42], bg_image: None, swipe: (None, None), widgets: vec![] }],
         }
     }
 }

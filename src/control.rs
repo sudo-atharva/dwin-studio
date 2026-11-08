@@ -83,6 +83,11 @@ pub static TOUCH_KINDS: &[Kind] = &[
         vp@17:2, data_format@19:1, cx@20:2, cy@22:2, r0@24:2, r1@26:2, a0@28:2, v_begin@30:2,
         a1@33:2, v_end@35:2,
     ]},
+    // mode bit 7: 0 = horizontal swipe (range = y0..y1), 1 = vertical (range = x0..x1).
+    Kind { code: 0x0B, name: "swipe_page", size: 32, fields: fields![
+        prev@17:2, next@19:2, range0@21:2, range1@23:2, speed@25:1, dist@26:2, mode@28:1, end_anim@29:1,
+    ]},
+    // adj_mode: 0 clear, 1 set, 2 invert, 3 momentary. FE0D uploads, FD0D does not.
     Kind { code: 0x0D, name: "bit_button", size: 32, fields: fields![
         vp@17:2, bit@19:1, adj_mode@20:1,
     ]},
@@ -104,6 +109,11 @@ pub static SHOW_KINDS: &[Kind] = &[
         x_adj@20:1, mode@21:1, lib@22:1, icon_mode@23:1, vp_mode@24:1, back_mode@25:1,
         icon_gamma@26:1, back_gamma@27:1, filter@28:1,
     ]},
+    // Number drawn with icons: icon0 = '0' .. icon0+9 = '9', +10 = '-', +11 = '.'.
+    Kind { code: 0x03, name: "art_number", size: 9, fields: fields![
+        sp@2:2, vp@6:2, x@8:2, y@10:2, icon0@12:2, lib@14:1, icon_mode@15:1, int_digits@16:1,
+        dec_digits@17:1, var_type@18:1, align@19:1, back_mode@20:1,
+    ]},
     Kind { code: 0x05, name: "icon_rotate", size: 12, fields: fields![
         sp@2:2, vp@6:2, icon@8:2, icon_cx@10:2, icon_cy@12:2, cx@14:2, cy@16:2, v_begin@18:2,
         v_end@20:2, angle_begin@22:2, angle_end@24:2, vp_mode@26:1, lib@27:1, mode@28:1,
@@ -123,6 +133,11 @@ pub static SHOW_KINDS: &[Kind] = &[
         box_y1@20:2, length@22:2, font0@24:1, font1@25:1, font_w@26:1, font_h@27:1,
         encode@28:1, hor_gap@29:1, ver_gap@30:1,
     ]},
+    Kind { code: 0x14, name: "scroll_text", size: 12, fields: fields![
+        sp@2:2, vp@6:2, mode@8:1, step@9:1, adjust@10:1, run@11:1, color@12:2, x0@14:2, y0@16:2,
+        x1@18:2, y1@20:2, font0@22:1, font1@23:1, font_w@24:1, font_h@25:1, encode@26:1, gap@27:1,
+        speed@28:1,
+    ]},
     // Text clock. lib low 7 bits; format chars Y M D H Q S W.
     Kind { code: 0x12, name: "rtc_text", size: 13, fields: fields![
         sp@2:2, x@8:2, y@10:2, color@12:2, lib@14:1, font_size@15:1, format@16:16,
@@ -132,6 +147,10 @@ pub static SHOW_KINDS: &[Kind] = &[
         v_center@18:2, color@20:2, mul_y@22:2, channel@24:1, step@25:1, pixel_scale@26:1,
     ]},
     // flags: 0x80 show percent, 0x02 no back fill, 0x01 no border.
+    Kind { code: 0x21, name: "graphics", size: 8, fields: fields![
+        sp@2:2, vp@6:2, x0@8:2, y0@10:2, x1@12:2, y1@14:2, dashed@16:1, format1@17:1, format2@18:1,
+        format3@19:1, format4@20:1,
+    ]},
     Kind { code: 0x23, name: "progress_bar", size: 13, fields: fields![
         sp@2:2, vp@6:2, x0@8:2, y0@10:2, x1@12:2, y1@14:2, border_color@16:2, fore_color@18:2,
         back_color@20:2, v_max@22:2, v_min@24:2, flags@26:1, orientation@27:1, var_type@28:1, vp_rt@30:2,

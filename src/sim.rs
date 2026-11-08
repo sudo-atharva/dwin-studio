@@ -31,6 +31,8 @@ pub struct Sim {
     curves: [Vec<i16>; 8],
     /// Widget index being held (slider drag, button highlight).
     pub held: Option<usize>,
+    /// Where the finger went down (swipe detection).
+    down_x: i32,
     start: Instant,
 }
 
@@ -42,7 +44,7 @@ impl Sim {
     pub fn new(p: &Project) -> Self {
         let mut s = Sim {
             page: 0, mem: vec![0; 0x20000], allocs: allocate(p).0, out: vec![], log: vec![], rx: vec![],
-            curves: Default::default(), held: None, start: Instant::now(),
+            curves: Default::default(), held: None, down_x: 0, start: Instant::now(),
         };
         for a in s.allocs.clone() {
             if let WidgetKind::Animation { autoplay: true, .. } = p.pages[a.page].widgets[a.widget].kind {
@@ -110,6 +112,7 @@ impl Sim {
 
     /// Finger down at screen pixel (x, y).
     pub fn press(&mut self, p: &Project, x: i32, y: i32) -> Option<Prompt> {
+        self.down_x = x;
         let ws = &p.pages[self.page].widgets;
         let wi = ws.iter().rposition(|w| Self::interactive(w) && x >= w.x && y >= w.y && x < w.x + w.w && y < w.y + w.h)?;
         let w = &ws[wi];
@@ -141,6 +144,11 @@ impl Sim {
                     self.held = None;
                 }
             }
+            WidgetKind::Toggle { bit: Some(b), .. } => {
+                let v = self.get(vp?) ^ (1 << (b % 16));
+                self.set(vp?, v);
+                self.send(vp?);
+            }
             WidgetKind::Toggle { .. } => {
                 let v = (self.get(vp?) == 0) as u16;
                 self.set(vp?, v);
@@ -171,8 +179,16 @@ impl Sim {
         }
     }
 
-    /// Finger up: a slider reports its final value.
-    pub fn release(&mut self, p: &Project) {
+    /// Finger up at x: a slider reports its final value; a long sideways move on a page
+    /// with swipe targets changes page.
+    pub fn release(&mut self, p: &Project, x: i32) {
+        let page = &p.pages[self.page];
+        let dx = x - self.down_x;
+        let target = if dx < -50 { page.swipe.1 } else if dx > 50 { page.swipe.0 } else { None };
+        if let Some(t) = target.filter(|&t| t < p.pages.len() && self.held.is_none()) {
+            self.page = t;
+            return;
+        }
         if let Some(wi) = self.held.take() {
             if matches!(p.pages[self.page].widgets.get(wi).map(|w| &w.kind), Some(WidgetKind::Slider { .. })) {
                 if let Some(vp) = self.vp(self.page, wi) {
@@ -285,7 +301,10 @@ impl Sim {
             let frac = |min: f32, max: f32| ((v as f32 - min) / (max - min).max(1.0)).clamp(0.0, 1.0);
             let (x, y, ww, hh) = frect(w);
             match &w.kind {
-                WidgetKind::Toggle { .. } => draw_state(&mut px, w, (v != 0) as usize, base),
+                WidgetKind::Toggle { bit: Some(b), .. } | WidgetKind::Lamp { bit: Some(b), .. } => {
+                    draw_state(&mut px, w, (v >> (b % 16) & 1) as usize, base)
+                }
+                WidgetKind::Toggle { .. } | WidgetKind::Lamp { .. } => draw_state(&mut px, w, (v != 0) as usize, base),
                 WidgetKind::Icons { .. } | WidgetKind::Dropdown { .. } => draw_state(&mut px, w, v as usize, base),
                 WidgetKind::Animation { images, period_ms, .. } => {
                     let n = images.len().max(1) as u64;
@@ -402,12 +421,12 @@ mod tests {
             width: 800,
             height: 480,
             pages: vec![
-                Page { name: "a".into(), bg: [0; 3], bg_image: None, widgets: vec![
+                Page { name: "a".into(), bg: [0; 3], bg_image: None, swipe: (None, None), widgets: vec![
                     Widget::new(kind("Button"), "key", 0, 0),          // VP 0x1000, key 1
                     Widget::new(kind("Toggle"), "t", 200, 0),          // VP 0x1010
                     Widget::new(go, "go", 0, 200),
                 ]},
-                Page { name: "b".into(), bg: [0; 3], bg_image: None, widgets: vec![Widget::new(kind("Number Input"), "n", 0, 0)] },
+                Page { name: "b".into(), bg: [0; 3], bg_image: None, swipe: (None, None), widgets: vec![Widget::new(kind("Number Input"), "n", 0, 0)] },
             ],
         };
         let mut s = Sim::new(&p);

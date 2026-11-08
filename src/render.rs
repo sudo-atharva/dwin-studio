@@ -177,6 +177,11 @@ pub fn draw_state(px: &mut Pixmap, w: &Widget, state: usize, base: &Path) {
             let kx = if state > 0 { x + ww - 3.0 - d } else { x + 3.0 };
             rounded(px, (kx, y + 3.0, d, d), d / 2.0, *knob);
         }
+        WidgetKind::Lamp { on, off, .. } => {
+            let (x, y, ww, hh) = frect(w);
+            let d = ww.min(hh);
+            rounded(px, (x + (ww - d) / 2.0, y + (hh - d) / 2.0, d, d), d / 2.0, if state > 0 { *on } else { *off });
+        }
         WidgetKind::Slider { knob, .. } => {
             let d = w.h as f32;
             rounded(px, (w.x as f32, w.y as f32, d, d), d / 2.0, *knob);
@@ -241,6 +246,7 @@ pub fn render(page: &Page, width: u16, height: u16, mode: Mode, base: &Path) -> 
                     draw_state(&mut px, w, 0, base);
                 }
             }
+            WidgetKind::Drawing { bg, .. } => rounded(&mut px, frect(w), 0.0, *bg),
             WidgetKind::Chart { step, color, bg, .. } => {
                 rounded(&mut px, frect(w), 0.0, *bg);
                 if mode == Mode::Preview {
@@ -295,7 +301,7 @@ pub fn render(page: &Page, width: u16, height: u16, mode: Mode, base: &Path) -> 
                 let r = if *vertical { (x + 1.0, y + hh * 0.6, ww - 2.0, hh * 0.4 - 1.0) } else { (x + 1.0, y + 1.0, ww * 0.4, hh - 2.0) };
                 rounded(&mut px, r, 0.0, *fg);
             }
-            WidgetKind::Toggle { .. } | WidgetKind::Icons { .. } | WidgetKind::Animation { .. } if dynamic => {
+            WidgetKind::Toggle { .. } | WidgetKind::Lamp { .. } | WidgetKind::Icons { .. } | WidgetKind::Animation { .. } if dynamic => {
                 draw_state(&mut px, w, 0, base)
             }
             // Editable fields get a box so the operator sees where to tap.
