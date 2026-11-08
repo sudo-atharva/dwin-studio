@@ -6,6 +6,10 @@
 use dwin_studio::build::{allocate, build, Alloc, Output};
 use dwin_studio::project::{default_widgets, Event, Page, Project, Widget, WidgetKind, PRESETS};
 use dwin_studio::render::{load_image, render, Mode};
+use dwin_studio::sim::{Prompt, Sim};
+use std::io::{Read, Write};
+use std::sync::mpsc;
+use std::time::Duration;
 use eframe::egui::{self, Color32, CollapsingHeader, Key, PointerButton, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, Vec2};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -107,6 +111,15 @@ struct App {
     rendered: Option<(Page, u16, u16, bool)>,
     status: String,
     title: String,
+    /// Some = Simulate mode (EEZ "Run"): the page behaves like the screen.
+    sim: Option<Sim>,
+    /// Keypad/keyboard/list the simulated screen is asking for, with typed text.
+    prompt: Option<(Prompt, String)>,
+    port: Option<Box<dyn serialport::SerialPort>>,
+    port_rx: Option<mpsc::Receiver<Vec<u8>>>,
+    ports: Vec<String>,
+    port_name: String,
+    baud: u32,
 }
 
 impl App {
@@ -131,6 +144,13 @@ impl App {
             rendered: None,
             status: "New project - save it to start importing images".into(),
             title: String::new(),
+            sim: None,
+            prompt: None,
+            port: None,
+            port_rx: None,
+            ports: vec![],
+            port_name: String::new(),
+            baud: 115200,
         };
         if let Some(p) = path {
             app.load(p);
@@ -417,6 +437,15 @@ impl App {
                 self.save(true);
             }
             ui.separator();
+            let running = self.sim.is_some();
+            if ui.selectable_label(!running, RichText::new("✏ Edit").strong()).clicked() && running {
+                self.stop_sim();
+            }
+            let run = ui.selectable_label(running, RichText::new("▶ Simulate").strong());
+            if run.on_hover_text("Run the screen: touch it, watch the UART frames, connect a COM port").clicked() && !running {
+                self.start_sim();
+            }
+            ui.separator();
             let build = egui::Button::new(RichText::new("▶ Build").strong().color(Color32::BLACK)).fill(ACCENT);
             if ui.add(build).on_hover_text("Write DWIN_SET, ui_gen.h, ui_map.txt").clicked() {
                 self.do_build();
@@ -451,6 +480,275 @@ impl App {
             ui.separator();
             ui.label(RichText::new(&self.status).weak());
         });
+    }
+
+    fn start_sim(&mut self) {
+        let mut s = Sim::new(&self.project);
+        s.page = self.page;
+        self.sim = Some(s);
+        self.drag = None;
+        self.refresh_ports();
+    }
+
+    fn stop_sim(&mut self) {
+        if let Some(s) = self.sim.take() {
+            self.page = s.page.min(self.project.pages.len() - 1);
+        }
+        self.prompt = None;
+    }
+
+    fn refresh_ports(&mut self) {
+        self.ports = serialport::available_ports().unwrap_or_default().into_iter().map(|p| p.port_name).collect();
+        if !self.ports.contains(&self.port_name) {
+            self.port_name = self.ports.first().cloned().unwrap_or_default();
+        }
+    }
+
+    fn connect(&mut self, ctx: &egui::Context) {
+        let opened = serialport::new(&self.port_name, self.baud).timeout(Duration::from_millis(50)).open();
+        let (port, mut reader) = match opened.and_then(|p| p.try_clone().map(|r| (p, r))) {
+            Ok(p) => p,
+            Err(e) => {
+                self.status = format!("{}: {e}", self.port_name);
+                return;
+            }
+        };
+        let (tx, rx) = mpsc::channel();
+        let ctx = ctx.clone();
+        // Reader thread; ends when the UI drops the receiver (disconnect) or the port fails.
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 512];
+            loop {
+                let chunk = match reader.read(&mut buf) {
+                    Ok(n) => buf[..n].to_vec(),
+                    Err(e) if e.kind() == std::io::ErrorKind::TimedOut => vec![],
+                    Err(_) => break,
+                };
+                let got = !chunk.is_empty();
+                if tx.send(chunk).is_err() {
+                    break;
+                }
+                if got {
+                    ctx.request_repaint();
+                }
+            }
+        });
+        self.status = format!("Simulator on {} @ {} baud", self.port_name, self.baud);
+        (self.port, self.port_rx) = (Some(port), Some(rx));
+    }
+
+    /// Move bytes between the serial port and the simulator.
+    fn pump(&mut self) {
+        let Some(sim) = &mut self.sim else { return };
+        if let Some(rx) = &self.port_rx {
+            while let Ok(b) = rx.try_recv() {
+                sim.feed(&b);
+            }
+        }
+        for f in sim.out.drain(..) {
+            if let Some(p) = &mut self.port {
+                if p.write_all(&f).is_err() {
+                    self.status = "Serial write failed - disconnected".into();
+                    (self.port, self.port_rx) = (None, None);
+                }
+            }
+        }
+        let n = sim.log.len();
+        if n > 1000 {
+            sim.log.drain(..n - 1000);
+        }
+    }
+
+    fn sim_canvas(&mut self, ui: &mut egui::Ui) {
+        let area = ui.available_rect_before_wrap();
+        let resp = ui.allocate_rect(area, Sense::click_and_drag());
+        let (pw, ph) = (self.project.width as f32, self.project.height as f32);
+        let scale = self.zoom.unwrap_or(((area.width() - 24.0) / pw).min((area.height() - 24.0) / ph).max(0.05));
+        let rect = Rect::from_center_size(area.center() + self.pan, Vec2::new(pw, ph) * scale);
+        let base = self.base();
+        let Some(sim) = &mut self.sim else { return };
+        let to_proj = |p: Pos2| ((p - rect.min) / scale).to_pos2();
+
+        let (down, up, pos) = ui.input(|i| (i.pointer.primary_pressed(), i.pointer.primary_released(), i.pointer.interact_pos()));
+        if let Some(p) = pos {
+            let q = to_proj(p);
+            if down && resp.hovered() && self.prompt.is_none() {
+                if let Some(pr) = sim.press(&self.project, q.x as i32, q.y as i32) {
+                    self.prompt = Some((pr, String::new()));
+                }
+            } else if resp.dragged() {
+                sim.drag(&self.project, q.x as i32);
+            }
+        }
+        if up {
+            sim.release(&self.project);
+        }
+
+        let px = sim.render(&self.project, &base);
+        let img = egui::ColorImage::from_rgba_premultiplied([px.width() as usize, px.height() as usize], px.data());
+        match &mut self.texture {
+            Some(t) => t.set(img, egui::TextureOptions::LINEAR),
+            None => self.texture = Some(ui.ctx().load_texture("page", img, egui::TextureOptions::LINEAR)),
+        }
+        self.rendered = None; // editor view re-renders when we leave
+        let painter = ui.painter_at(area);
+        painter.rect_filled(area, 0.0, Color32::from_gray(24));
+        if let Some(t) = &self.texture {
+            painter.image(t.id(), rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+        }
+        // Pressed feedback, like DWIN copying from the pressed page image.
+        let page = &self.project.pages[sim.page.min(self.project.pages.len() - 1)];
+        if let Some(w) = sim.held.and_then(|i| page.widgets.get(i)).filter(|w| matches!(w.kind, WidgetKind::Button { .. })) {
+            let r = Rect::from_min_size(rect.min + Vec2::new(w.x as f32, w.y as f32) * scale, Vec2::new(w.w as f32, w.h as f32) * scale);
+            painter.rect_filled(r, 4.0, Color32::from_rgba_unmultiplied(0, 0, 0, 90));
+        }
+        let green = Color32::from_rgb(34, 197, 94);
+        painter.rect_stroke(rect, 0.0, Stroke::new(2.0, green), StrokeKind::Outside);
+        let label = format!("SIMULATING  page {}: {}", sim.page, page.name);
+        painter.text(rect.left_top() - Vec2::new(0.0, 4.0), egui::Align2::LEFT_BOTTOM, label, egui::FontId::proportional(12.0), green);
+        ui.ctx().request_repaint_after(Duration::from_millis(50)); // clock, animations
+    }
+
+    /// Bottom panel in Simulate mode: COM port + UART log.
+    fn sim_panel(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.strong("UART");
+            let shown = if self.port_name.is_empty() { "(no port)".to_string() } else { self.port_name.clone() };
+            egui::ComboBox::from_id_salt("port").selected_text(shown).show_ui(ui, |ui| {
+                for p in &self.ports {
+                    ui.selectable_value(&mut self.port_name, p.clone(), p);
+                }
+            });
+            if ui.small_button("⟳").on_hover_text("Rescan COM ports").clicked() {
+                self.refresh_ports();
+            }
+            egui::ComboBox::from_id_salt("baud").selected_text(self.baud.to_string()).show_ui(ui, |ui| {
+                for b in [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600] {
+                    ui.selectable_value(&mut self.baud, b, b.to_string());
+                }
+            });
+            if self.port.is_some() {
+                if ui.button("Disconnect").clicked() {
+                    (self.port, self.port_rx) = (None, None);
+                    self.status = "Serial disconnected".into();
+                }
+                ui.label(RichText::new("● connected").color(Color32::from_rgb(34, 197, 94)));
+            } else if ui.add_enabled(!self.port_name.is_empty(), egui::Button::new("Connect")).clicked() {
+                self.connect(&ui.ctx().clone());
+            }
+            ui.label(RichText::new("Any USB-UART adapter: wire it to your MCU's screen UART; this window is the screen.").weak());
+            if ui.small_button("Clear").clicked() {
+                if let Some(s) = &mut self.sim {
+                    s.log.clear();
+                }
+            }
+        });
+        ui.separator();
+        let Some(sim) = &self.sim else { return };
+        egui::ScrollArea::vertical().stick_to_bottom(true).auto_shrink(false).show(ui, |ui| {
+            for l in &sim.log {
+                let c = if l.starts_with('→') { Color32::from_rgb(250, 180, 40) } else { Color32::from_rgb(96, 165, 250) };
+                ui.label(RichText::new(l).monospace().color(c));
+            }
+            if sim.log.is_empty() {
+                ui.label(RichText::new("Touch the screen to see frames. → = screen to MCU, ← = MCU to screen.").weak());
+            }
+        });
+    }
+
+    /// Right panel in Simulate mode: every VP, editable like an MCU write.
+    fn sim_vars(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Variables");
+        ui.label(RichText::new("Edit a value = MCU writes it").weak());
+        let Some(sim) = &mut self.sim else { return };
+        ui.horizontal(|ui| {
+            ui.label("Page");
+            let mut pg = sim.page;
+            egui::ComboBox::from_id_salt("simpage").selected_text(format!("{pg}")).show_ui(ui, |ui| {
+                for (i, p) in self.project.pages.iter().enumerate() {
+                    ui.selectable_value(&mut pg, i, format!("{i}: {}", p.name));
+                }
+            });
+            sim.page = pg;
+        });
+        egui::Grid::new("simvars").striped(true).num_columns(3).show(ui, |ui| {
+            for a in sim.allocs.clone() {
+                let w = &self.project.pages[a.page].widgets[a.widget];
+                ui.label(&a.name).on_hover_text(&w.comment);
+                ui.monospace(format!("{:#06x}", a.vp));
+                match &w.kind {
+                    WidgetKind::Text { len, .. } | WidgetKind::Qr { len, .. } => {
+                        let mut t = sim.text_at(a.vp, *len);
+                        if ui.add(egui::TextEdit::singleline(&mut t).desired_width(110.0)).changed() {
+                            let mut b = t.into_bytes();
+                            b.truncate(*len as usize);
+                            b.extend([0xFF, 0xFF]);
+                            for (i, pair) in b.chunks(2).enumerate() {
+                                sim.set(a.vp + i as u16, u16::from_be_bytes([pair[0], *pair.get(1).unwrap_or(&0xFF)]));
+                            }
+                        }
+                    }
+                    _ => {
+                        let mut v = sim.get(a.vp) as i16 as i32;
+                        if ui.add(egui::DragValue::new(&mut v).range(-32768..=65535)).changed() {
+                            sim.set(a.vp, v as u16);
+                        }
+                    }
+                }
+                ui.end_row();
+            }
+        });
+        ui.add_space(6.0);
+        ui.label(RichText::new("Chart samples: MCU writes 0x0310. Clock shows PC time (UTC).").weak().small());
+    }
+
+    /// The simulated screen's keypad / keyboard / list.
+    fn prompt_window(&mut self, ctx: &egui::Context) {
+        let (Some((pr, typed)), Some(sim)) = (&mut self.prompt, &mut self.sim) else { return };
+        let mut close = false;
+        let win = egui::Window::new("Screen input").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]);
+        win.show(ctx, |ui| {
+            let enter = ui.input(|i| i.key_pressed(Key::Enter));
+            match pr.clone() {
+                Prompt::Number { vp, dec, min, max } => {
+                    let k = 10f64.powi(dec as i32);
+                    ui.label(format!("Number {:.*} .. {:.*}", dec as usize, min as f64 / k, dec as usize, max as f64 / k));
+                    ui.text_edit_singleline(typed).request_focus();
+                    ui.horizontal(|ui| {
+                        if ui.button("OK").clicked() || enter {
+                            if sim.answer_number(vp, dec, min, max, typed) {
+                                close = true;
+                            } else {
+                                typed.clear(); // the screen rejects out-of-range input
+                            }
+                        }
+                        close |= ui.button("Esc").clicked();
+                    });
+                }
+                Prompt::Text { vp, len } => {
+                    ui.label(format!("Text, up to {len} characters"));
+                    ui.text_edit_singleline(typed).request_focus();
+                    ui.horizontal(|ui| {
+                        if ui.button("OK").clicked() || enter {
+                            sim.answer_text(vp, len, typed);
+                            close = true;
+                        }
+                        close |= ui.button("Esc").clicked();
+                    });
+                }
+                Prompt::Menu { vp, options } => {
+                    for (i, o) in options.iter().enumerate() {
+                        if ui.add_sized([180.0, 28.0], egui::Button::new(o)).clicked() {
+                            sim.answer_menu(vp, i);
+                            close = true;
+                        }
+                    }
+                }
+            }
+        });
+        if close || ctx.input(|i| i.key_pressed(Key::Escape)) {
+            self.prompt = None;
+        }
     }
 
     fn left_panel(&mut self, ui: &mut egui::Ui) {
@@ -1191,6 +1489,22 @@ fn vp_editor(ui: &mut egui::Ui, vp: &mut Option<u16>, resolved: Option<u16>) {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let before = self.project.clone();
+        if self.sim.is_some() {
+            self.pump();
+            egui::Panel::top("toolbar").show(ui, |ui| {
+                ui.add_space(4.0);
+                self.toolbar(ui);
+                ui.add_space(4.0);
+            });
+            egui::Panel::right("simvars").default_size(300.0).show(ui, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| self.sim_vars(ui));
+            });
+            egui::Panel::bottom("simlog").resizable(true).default_size(180.0).show(ui, |ui| self.sim_panel(ui));
+            egui::CentralPanel::no_frame().show(ui, |ui| self.sim_canvas(ui));
+            self.prompt_window(&ui.ctx().clone());
+            self.pump();
+            return;
+        }
         self.shortcuts(&ui.ctx().clone());
         let (allocs, warnings) = allocate(&self.project);
 

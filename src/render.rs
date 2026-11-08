@@ -35,14 +35,14 @@ pub fn load_image(base: &Path, rel: &str) -> Option<Arc<RgbaImage>> {
         .clone()
 }
 
-fn paint(c: Rgb) -> Paint<'static> {
+pub(crate) fn paint(c: Rgb) -> Paint<'static> {
     let mut p = Paint::default();
     p.set_color(Color::from_rgba8(c[0], c[1], c[2], 255));
     p.anti_alias = true;
     p
 }
 
-fn rounded(px: &mut Pixmap, (x, y, w, h): (f32, f32, f32, f32), r: f32, c: Rgb) {
+pub(crate) fn rounded(px: &mut Pixmap, (x, y, w, h): (f32, f32, f32, f32), r: f32, c: Rgb) {
     let (w, h) = (w.max(1.0), h.max(1.0));
     let r = r.min(w / 2.0).min(h / 2.0).max(0.0);
     let path = if r == 0.0 {
@@ -65,7 +65,7 @@ fn rounded(px: &mut Pixmap, (x, y, w, h): (f32, f32, f32, f32), r: f32, c: Rgb) 
     px.fill_path(&path, &paint(c), FillRule::Winding, Transform::identity(), None);
 }
 
-fn frect(w: &Widget) -> (f32, f32, f32, f32) {
+pub(crate) fn frect(w: &Widget) -> (f32, f32, f32, f32) {
     (w.x as f32, w.y as f32, w.w as f32, w.h as f32)
 }
 
@@ -88,7 +88,7 @@ fn blend(data: &mut [u8], pw: i32, ph: i32, x: i32, y: i32, c: [u8; 3], a: f32) 
 }
 
 /// Draw `text` with its top-left at (x, y).
-fn text(px: &mut Pixmap, s: &str, x: f32, y: f32, size: f32, c: Rgb) {
+pub(crate) fn text(px: &mut Pixmap, s: &str, x: f32, y: f32, size: f32, c: Rgb) {
     let f = font();
     let sf = f.as_scaled(PxScale::from(size));
     let (pw, ph) = (px.width() as i32, px.height() as i32);
@@ -111,7 +111,7 @@ fn centered(px: &mut Pixmap, r: (f32, f32, f32, f32), s: &str, size: f32, c: Rgb
 }
 
 /// Stretch an image into a rect, alpha-blended. `dim` < 1 darkens (pressed state).
-fn picture(px: &mut Pixmap, img: &RgbaImage, (x, y, w, h): (i32, i32, i32, i32), dim: f32) {
+pub(crate) fn picture(px: &mut Pixmap, img: &RgbaImage, (x, y, w, h): (i32, i32, i32, i32), dim: f32) {
     if w <= 0 || h <= 0 {
         return;
     }
@@ -125,7 +125,7 @@ fn picture(px: &mut Pixmap, img: &RgbaImage, (x, y, w, h): (i32, i32, i32, i32),
 }
 
 /// Polyline with round caps.
-fn line(px: &mut Pixmap, pts: &[(f32, f32)], width: f32, c: Rgb) {
+pub(crate) fn line(px: &mut Pixmap, pts: &[(f32, f32)], width: f32, c: Rgb) {
     let mut pb = PathBuilder::new();
     for (i, &(x, y)) in pts.iter().enumerate() {
         if i == 0 { pb.move_to(x, y) } else { pb.line_to(x, y) }
@@ -136,7 +136,7 @@ fn line(px: &mut Pixmap, pts: &[(f32, f32)], width: f32, c: Rgb) {
 }
 
 /// Point at `deg` clockwise from 12 o'clock (DGUS rotation convention).
-fn polar(cx: f32, cy: f32, r: f32, deg: f32) -> (f32, f32) {
+pub(crate) fn polar(cx: f32, cy: f32, r: f32, deg: f32) -> (f32, f32) {
     let a = deg.to_radians();
     (cx + r * a.sin(), cy - r * a.cos())
 }
