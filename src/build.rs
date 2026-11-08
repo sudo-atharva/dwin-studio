@@ -878,7 +878,7 @@ fn describe(p: &Project, w: &Widget, a: Option<&Alloc>) -> Option<String> {
             "CHART   channel {channel}, {min}..{max}; add samples: 5A A5 <len> 82 03 10 5A A5 01 00 {channel:02X} <count> <int16 samples> (check your T5L manual)"
         ),
         WidgetKind::Drawing { words, .. } => format!(
-            "DRAWING VP {:#06x} ({words} words): MCU writes basic-graphics commands here (T5L manual: 0x0002 lines, 0x0003 boxes, 0x0004 filled boxes...), 0x0000 ends",
+            "DRAWING VP {:#06x} ({words} words): MCU writes basic-graphics commands here (T5L manual: 0x0002 lines, 0x0003 boxes, 0x0004 filled boxes...), 0xFF00 ends",
             vp()
         ),
         WidgetKind::Gauge { min, max, knob, .. } => format!(

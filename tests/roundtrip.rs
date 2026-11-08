@@ -97,3 +97,14 @@ fn typed_controls_roundtrip() {
     assert!(failures.is_empty(), "\n{}", failures.join("\n"));
     assert!(!seen.keys().any(|k| k.starts_with("UNTYPED")), "untyped kinds: {seen:?}");
 }
+
+/// Both shipped examples load and build with no warnings (VP clashes, overlaps, bad targets).
+#[test]
+fn examples_build_clean() {
+    for f in ["examples/demo.dwin", "examples/showcase/showcase.dwin"] {
+        let p: dwin_studio::project::Project = serde_json::from_str(&std::fs::read_to_string(f).unwrap()).unwrap();
+        let dir = std::path::Path::new(f).parent().unwrap();
+        let out = dwin_studio::build::build(&p, dir).unwrap();
+        assert!(out.warnings.is_empty(), "{f}: {:?}", out.warnings);
+    }
+}

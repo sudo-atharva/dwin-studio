@@ -1,0 +1,1681 @@
+{
+  "width": 800,
+  "height": 480,
+  "pages": [
+    {
+      "name": "buttons",
+      "bg": [
+        15,
+        23,
+        42
+      ],
+      "bg_image": null,
+      "swipe": [
+        null,
+        1
+      ],
+      "widgets": [
+        {
+          "name": "title0",
+          "x": 24,
+          "y": 14,
+          "w": 520,
+          "h": 44,
+          "comment": "",
+          "kind": {
+            "Label": {
+              "text": "1  Buttons & switches",
+              "size": 28.0,
+              "color": [
+                203,
+                213,
+                225
+              ]
+            }
+          }
+        },
+        {
+          "name": "next0",
+          "x": 696,
+          "y": 14,
+          "w": 80,
+          "h": 44,
+          "comment": "Next screen",
+          "kind": {
+            "Button": {
+              "text": "›",
+              "size": 24.0,
+              "fg": [
+                255,
+                255,
+                255
+              ],
+              "bg": [
+                37,
+                99,
+                235
+              ],
+              "pressed_bg": [
+                29,
+                78,
+                216
+              ],
+              "radius": 10.0,
+              "image": null,
+              "goto": 1,
+              "event": "None",
+              "invisible": false
+            }
+          }
+        },
+        {
+          "name": "card_left",
+          "x": 16,
+          "y": 72,
+          "w": 372,
+          "h": 392,
+          "comment": "",
+          "kind": {
+            "Panel": {
+              "color": [
+                30,
+                41,
+                59
+              ],
+              "radius": 12.0
+            }
+          }
+        },
+        {
+          "name": "card_right",
+          "x": 404,
+          "y": 72,
+          "w": 380,
+          "h": 392,
+          "comment": "",
+          "kind": {
+            "Panel": {
+              "color": [
+                30,
+                41,
+                59
+              ],
+              "radius": 12.0
+            }
+          }
+        },
+        {
+          "name": "beep",
+          "x": 36,
+          "y": 92,
+          "w": 156,
+          "h": 60,
+          "comment": "Push button: sends key 0x0001 each tap",
+          "kind": {
+            "Button": {
+              "text": "Beep",
+              "size": 24.0,
+              "fg": [
+                255,
+                255,
+                255
+              ],
+              "bg": [
+                37,
+                99,
+                235
+              ],
+              "pressed_bg": [
+                29,
+                78,
+                216
+              ],
+              "radius": 10.0,
+              "image": null,
+              "goto": null,
+              "event": {
+                "Key": {
+                  "vp": null,
+                  "key": 1
+                }
+              },
+              "invisible": false
+            }
+          }
+        },
+        {
+          "name": "pump",
+          "x": 212,
+          "y": 92,
+          "w": 156,
+          "h": 60,
+          "comment": "On/off button: 1 = pump on (stays pressed), 0 = off",
+          "kind": {
+            "Button": {
+              "text": "Pump",
+              "size": 24.0,
+              "fg": [
+                255,
+                255,
+                255
+              ],
+              "bg": [
+                37,
+                99,
+                235
+              ],
+              "pressed_bg": [
+                29,
+                78,
+                216
+              ],
+              "radius": 10.0,
+              "image": null,
+              "goto": null,
+              "event": {
+                "Latch": {
+                  "vp": null
+                }
+              },
+              "invisible": false
+            }
+          }
+        },
+        {
+          "name": "level_label",
+          "x": 36,
+          "y": 176,
+          "w": 200,
+          "h": 30,
+          "comment": "",
+          "kind": {
+            "Label": {
+              "text": "Level %",
+              "size": 20.0,
+              "color": [
+                203,
+                213,
+                225
+              ]
+            }
+          }
+        },
+        {
+          "name": "level_down",
+          "x": 36,
+          "y": 212,
+          "w": 64,
+          "h": 56,
+          "comment": "+/- button: steps 'level' by 5, hold to repeat",
+          "kind": {
+            "Button": {
+              "text": "−",
+              "size": 30.0,
+              "fg": [
+                255,
+                255,
+                255
+              ],
+              "bg": [
+                37,
+                99,
+                235
+              ],
+              "pressed_bg": [
+                29,
+                78,
+                216
+              ],
+              "radius": 10.0,
+              "image": null,
+              "goto": null,
+              "event": {
+                "Adjust": {
+                  "target": "level",
+                  "step": -5,
+                  "min": 0,
+                  "max": 100,
+                  "wrap": false,
+                  "repeat": true
+                }
+              },
+              "invisible": false
+            }
+          }
+        },
+        {
+          "name": "level_up",
+          "x": 304,
+          "y": 212,
+          "w": 64,
+          "h": 56,
+          "comment": "+/- button: steps 'level' by 5, hold to repeat",
+          "kind": {
+            "Button": {
+              "text": "+",
+              "size": 30.0,
+              "fg": [
+                255,
+                255,
+                255
+              ],
+              "bg": [
+                37,
+                99,
+                235
+              ],
+              "pressed_bg": [
+                29,
+                78,
+                216
+              ],
+              "radius": 10.0,
+              "image": null,
+              "goto": null,
+              "event": {
+                "Adjust": {
+                  "target": "level",
+                  "step": 5,
+                  "min": 0,
+                  "max": 100,
+                  "wrap": false,
+                  "repeat": true
+                }
+              },
+              "invisible": false
+            }
+          }
+        },
+        {
+          "name": "level",
+          "x": 112,
+          "y": 212,
+          "w": 180,
+          "h": 56,
+          "comment": "Level 0..100, changed by the +/- buttons",
+          "kind": {
+            "Number": {
+              "vp": null,
+              "int_digits": 3,
+              "dec_digits": 0,
+              "color": [
+                255,
+                255,
+                255
+              ],
+              "input": null,
+              "smooth": false
+            }
+          }
+        },
+        {
+          "name": "dimmer_label",
+          "x": 36,
+          "y": 290,
+          "w": 300,
+          "h": 30,
+          "comment": "",
+          "kind": {
+            "Label": {
+              "text": "Dimmer (slider)",
+              "size": 20.0,
+              "color": [
+                203,
+                213,
+                225
+              ]
+            }
+          }
+        },
+        {
+          "name": "dimmer",
+          "x": 36,
+          "y": 326,
+          "w": 332,
+          "h": 44,
+          "comment": "Slider 0..100: drag sends it, MCU write moves the knob",
+          "kind": {
+            "Slider": {
+              "vp": null,
+              "min": 0,
+              "max": 100,
+              "track": [
+                71,
+                85,
+                105
+              ],
+              "knob": [
+                255,
+                255,
+                255
+              ],
+              "show_track": true
+            }
+          }
+        },
+        {
+          "name": "note0",
+          "x": 36,
+          "y": 400,
+          "w": 332,
+          "h": 28,
+          "comment": "",
+          "kind": {
+            "Label": {
+              "text": "Swipe left/right to change screens",
+              "size": 16.0,
+              "color": [
+                203,
+                213,
+                225
+              ]
+            }
+          }
+        },
+        {
+          "name": "status_buttons",
+          "x": 300,
+          "y": 22,
+          "w": 290,
+          "h": 28,
+          "comment": "Status line from the MCU (32 bytes ASCII), on every screen",
+          "kind": {
+            "Text": {
+              "vp": 12288,
+              "len": 32,
+              "color": [
+                134,
+                239,
+                172
+              ],
+              "input": false,
+              "scroll": false,
+              "unicode": false
+            }
+          }
+        },
+        {
+          "name": "fan_label",
+          "x": 424,
+          "y": 96,
+          "w": 80,
+          "h": 40,
+          "comment": "",
+          "kind": {
+            "Label": {
+              "text": "Fan",
+              "size": 22.0,
+              "color": [
+                203,
+                213,
+                225
+              ]
+            }
+          }
+        },
+        {
+          "name": "fan",
+          "x": 520,
+          "y": 96,
+          "w": 90,
+          "h": 44,
+          "comment": "Toggle: 1 = fan on; MCU mirrors it to fan_lamp",
+          "kind": {
+            "Toggle": {
+              "vp": null,
+              "on": [
+                34,
+                197,
+                94
+              ],
+              "off": [
+                71,
+                85,
+                105
+              ],
+              "knob": [
+                255,
+                255,
+                255
+              ],
+              "bit": null
+            }
+          }
+        },
+        {
+          "name": "fan_lamp",
+          "x": 634,
+          "y": 102,
+          "w": 32,
+          "h": 32,
+          "comment": "Lamp: MCU writes 1 to light it",
+          "kind": {
+            "Lamp": {
+              "vp": null,
+              "bit": null,
+              "on": [
+                34,
+                197,
+                94
+              ],
+              "off": [
+                51,
+                65,
+                85
+              ]
+            }
+          }
+        },
+        {
+          "name": "heater_label",
+          "x": 424,
+          "y": 156,
+          "w": 140,
+          "h": 40,
+          "comment": "",
+          "kind": {
+            "Label": {
+              "text": "heater (bit 0)",
+              "size": 20.0,
+              "color": [
+                203,
+                213,
+                225
+              ]
+            }
+          }
+        },
+        {
+          "name": "heater",
+          "x": 580,
+          "y": 156,
+          "w": 80,
+          "h": 40,
+          "comment": "Bit 0 of VP 0x2000 (flags word)",
+          "kind": {
+            "Toggle": {
+              "vp": 8192,
+              "on": [
+                34,
+                197,
+                94
+              ],
+              "off": [
+                71,
+                85,
+                105
+              ],
+              "knob": [
+                255,
+                255,
+                255
+              ],
+              "bit": 0
+            }
+          }
+        },
+        {
+          "name": "heater_lamp",
+          "x": 684,
+          "y": 160,
+          "w": 32,
+          "h": 32,
+          "comment": "Lamp on bit 0 of VP 0x2000",
+          "kind": {
+            "Lamp": {
+              "vp": 8192,
+              "bit": 0,
+              "on": [
+                34,
+                197,
+                94
+              ],
+              "off": [
+                51,
+                65,
+                85
+              ]
+            }
+          }
+        },
+        {
+          "name": "light_label",
+          "x": 424,
+          "y": 208,
+          "w": 140,
+          "h": 40,
+          "comment": "",
+          "kind": {
+            "Label": {
+              "text": "light (bit 1)",
+              "size": 20.0,
+              "color": [
+                203,
+                213,
+                225
+              ]
+            }
+          }
+        },
+        {
+          "name": "light",
+          "x": 580,
+          "y": 208,
+          "w": 80,
+          "h": 40,
+          "comment": "Bit 1 of VP 0x2000 (flags word)",
+          "kind": {
+            "Toggle": {
+              "vp": 8192,
+              "on": [
+                34,
+                197,
+                94
+              ],
+              "off": [
+                71,
+                85,
+                105
+              ],
+              "knob": [
+                255,
+                255,
+                255
+              ],
+              "bit": 1
+            }
+          }
+        },
+        {
+          "name": "light_lamp",
+          "x": 684,
+          "y": 212,
+          "w": 32,
+          "h": 32,
+          "comment": "Lamp on bit 1 of VP 0x2000",
+          "kind": {
+            "Lamp": {
+              "vp": 8192,
+              "bit": 1,
+              "on": [
+                34,
+                197,
+                94
+              ],
+              "off": [
+                51,
+                65,
+                85
+              ]
+            }
+          }
+        },
+        {
+          "name": "rpm",
+          "x": 424,
+          "y": 264,
+          "w": 200,
+          "h": 70,
+          "comment": "Big number with smooth count-up, MCU writes rpm",
+          "kind": {
+            "Number": {
+              "vp": null,
+              "int_digits": 3,
+              "dec_digits": 0,
+              "color": [
+                255,
+                255,
+                255
+              ],
+              "input": null,
+              "smooth": true
+            }
+          }
+        },
+        {
+          "name": "volts",
+          "x": 640,
+          "y": 280,
+          "w": 128,
+          "h": 44,
+          "comment": "Number with 2 decimals: MCU sends volts x100",
+          "kind": {
+            "Number": {
+              "vp": null,
+              "int_digits": 2,
+              "dec_digits": 2,
+              "color": [
+                250,
+                204,
+                21
+              ],
+              "input": null,
+              "smooth": false
+            }
+          }
+        },
+        {
+          "name": "battery",
+          "x": 424,
+          "y": 372,
+          "w": 64,
+          "h": 64,
+          "comment": "Icon picked by value: 0 empty .. 3 full",
+          "kind": {
+            "Icons": {
+              "vp": null,
+              "images": [
+                "assets/battery_0.png",
+                "assets/battery_1.png",
+                "assets/battery_2.png",
+                "assets/battery_3.png"
+              ]
+            }
+          }
+        },
+        {
+          "name": "spinner",
+          "x": 512,
+          "y": 372,
+          "w": 64,
+          "h": 64,
+          "comment": "Animation: plays its frames on its own",
+          "kind": {
+            "Animation": {
+              "vp": null,
+              "images": [
+                "assets/fan_0.png",
+                "assets/fan_1.png",
+                "assets/fan_2.png",
+                "assets/fan_3.png"
+              ],
+              "period_ms": 200,
+              "autoplay": true
+            }
+          }
+        },
+        {
+          "name": "logo",
+          "x": 700,
+          "y": 372,
+          "w": 64,
+          "h": 64,
+          "comment": "Static picture",
+          "kind": {
+            "Image": {
+              "path": "assets/logo.png"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "inputs",
+      "bg": [
+        15,
+        23,
+        42
+      ],
+      "bg_image": null,
+      "swipe": [
+        0,
+        2
+      ],
+      "widgets": [
+        {
+          "name": "title1",
+          "x": 24,
+          "y": 14,
+          "w": 520,
+          "h": 44,
+          "comment": "",
+          "kind": {
+            "Label": {
+              "text": "2  Inputs",
+              "size": 28.0,
+              "color": [
+                203,
+                213,
+                225
+              ]
+            }
+          }
+        },
+        {
+          "name": "prev1",
+          "x": 604,
+          "y": 14,
+          "w": 80,
+          "h": 44,
+          "comment": "Previous screen",
+          "kind": {
+            "Button": {
+              "text": "‹",
+              "size": 24.0,
+              "fg": [
+                255,
+                255,
+                255
+              ],
+              "bg": [
+                37,
+                99,
+                235
+              ],
+              "pressed_bg": [
+                29,
+                78,
+                216
+              ],
+              "radius": 10.0,
+              "image": null,
+              "goto": 0,
+              "event": "None",
+              "invisible": false
+            }
+          }
+        },
+        {
+          "name": "next1",
+          "x": 696,
+          "y": 14,
+          "w": 80,
+          "h": 44,
+          "comment": "Next screen",
+          "kind": {
+            "Button": {
+              "text": "›",
+              "size": 24.0,
+              "fg": [
+                255,
+                255,
+                255
+              ],
+              "bg": [
+                37,
+                99,
+                235
+              ],
+              "pressed_bg": [
+                29,
+                78,
+                216
+              ],
+              "radius": 10.0,
+              "image": null,
+              "goto": 2,
+              "event": "None",
+              "invisible": false
+            }
+          }
+        },
+        {
+          "name": "status_inputs",
+          "x": 300,
+          "y": 22,
+          "w": 290,
+          "h": 28,
+          "comment": "Status line from the MCU (32 bytes ASCII), on every screen",
+          "kind": {
+            "Text": {
+              "vp": 12288,
+              "len": 32,
+              "color": [
+                134,
+                239,
+                172
+              ],
+              "input": false,
+              "scroll": false,
+              "unicode": false
+            }
+          }
+        },
+        {
+          "name": "card_in",
+          "x": 16,
+          "y": 72,
+          "w": 380,
+          "h": 392,
+          "comment": "",
+          "kind": {
+            "Panel": {
+              "color": [
+                30,
+                41,
+                59
+              ],
+              "radius": 12.0
+            }
+          }
+        },
+        {
+          "name": "card_lists",
+          "x": 404,
+          "y": 72,
+          "w": 380,
+          "h": 392,
+          "comment": "",
+          "kind": {
+            "Panel": {
+              "color": [
+                30,
+                41,
+                59
+              ],
+              "radius": 12.0
+            }
+          }
+        },
+        {
+          "name": "setpoint_label",
+          "x": 32,
+          "y": 88,
+          "w": 130,
+          "h": 44,
+          "comment": "",
+          "kind": {
+            "Label": {
+              "text": "Setpoint",
+              "size": 20.0,
+              "color": [
+                203,
+                213,
+                225
+              ]
+            }
+          }
+        },
+        {
+          "name": "setpoint",
+          "x": 170,
+          "y": 88,
+          "w": 200,
+          "h": 44,
+          "comment": "Tap: keypad, 0..999, sent when OK is pressed",
+          "kind": {
+            "Number": {
+              "vp": null,
+              "int_digits": 3,
+              "dec_digits": 0,
+              "color": [
+                255,
+                255,
+                255
+              ],
+              "input": [
+                0,
+                999
+              ],
+              "smooth": false
+            }
+          }
+        },
+        {
+          "name": "name_label",
+          "x": 32,
+          "y": 144,
+          "w": 130,
+          "h": 44,
+          "comment": "",
+          "kind": {
+            "Label": {
+              "text": "Name",
+              "size": 20.0,
+              "color": [
+                203,
+                213,
+                225
+              ]
+            }
+          }
+        },
+        {
+          "name": "name",
+          "x": 170,
+          "y": 144,
+          "w": 200,
+          "h": 44,
+          "comment": "Tap: keyboard, ASCII text sent on OK",
+          "kind": {
+            "Text": {
+              "vp": null,
+              "len": 20,
+              "color": [
+                255,
+                255,
+                255
+              ],
+              "input": true,
+              "scroll": false,
+              "unicode": false
+            }
+          }
+        },
+        {
+          "name": "mode_label",
+          "x": 32,
+          "y": 200,
+          "w": 130,
+          "h": 44,
+          "comment": "",
+          "kind": {
+            "Label": {
+              "text": "Mode",
+              "size": 20.0,
+              "color": [
+                203,
+                213,
+                225
+              ]
+            }
+          }
+        },
+        {
+          "name": "mode",
+          "x": 170,
+          "y": 200,
+          "w": 200,
+          "h": 44,
+          "comment": "Dropdown: 0 Auto, 1 Manual, 2 Off",
+          "kind": {
+            "Dropdown": {
+              "vp": null,
+              "options": [
+                "Auto",
+                "Manual",
+                "Off"
+              ],
+              "size": 22.0,
+              "fg": [
+                255,
+                255,
+                255
+              ],
+              "bg": [
+                51,
+                65,
+                85
+              ]
+            }
+          }
+        },
+        {
+          "name": "hour_label",
+          "x": 32,
+          "y": 300,
+          "w": 130,
+          "h": 44,
+          "comment": "",
+          "kind": {
+            "Label": {
+              "text": "Hour",
+              "size": 20.0,
+              "color": [
+                203,
+                213,
+                225
+              ]
+            }
+          }
+        },
+        {
+          "name": "hour",
+          "x": 170,
+          "y": 256,
+          "w": 120,
+          "h": 132,
+          "comment": "Roller: tap top/bottom to step, value 0..23",
+          "kind": {
+            "Roller": {
+              "vp": null,
+              "items": [
+                "00",
+                "01",
+                "02",
+                "03",
+                "04",
+                "05",
+                "06",
+                "07",
+                "08",
+                "09",
+                "10",
+                "11",
+                "12",
+                "13",
+                "14",
+                "15",
+                "16",
+                "17",
+                "18",
+                "19",
+                "20",
+                "21",
+                "22",
+                "23"
+              ],
+              "size": 28.0,
+              "fg": [
+                255,
+                255,
+                255
+              ],
+              "bg": [
+                30,
+                41,
+                59
+              ],
+              "wrap": true
+            }
+          }
+        },
+        {
+          "name": "clock",
+          "x": 32,
+          "y": 408,
+          "w": 340,
+          "h": 40,
+          "comment": "Screen clock; tap to set it with the keypad",
+          "kind": {
+            "Clock": {
+              "format": "Y-M-D H:Q",
+              "color": [
+                255,
+                255,
+                255
+              ],
+              "settable": true
+            }
+          }
+        },
+        {
+          "name": "recipe",
+          "x": 420,
+          "y": 88,
+          "w": 348,
+          "h": 168,
+          "comment": "Fixed list: picked row 1..4 sent, 0 = none",
+          "kind": {
+            "List": {
+              "vp": null,
+              "items": [
+                "Program 1",
+                "Program 2",
+                "Program 3",
+                "Program 4"
+              ],
+              "size": 22.0,
+              "fg": [
+                255,
+                255,
+                255
+              ],
+              "bg": [
+                30,
+                41,
+                59
+              ],
+              "sel": [
+                37,
+                99,
+                235
+              ],
+              "mcu_len": 0
+            }
+          }
+        },
+        {
+          "name": "files",
+          "x": 420,
+          "y": 268,
+          "w": 236,
+          "h": 180,
+          "comment": "List whose rows the MCU writes (20 bytes each)",
+          "kind": {
+            "List": {
+              "vp": null,
+              "items": [
+                "(MCU row 1)",
+                "(MCU row 2)",
+                "(MCU row 3)",
+                "(MCU row 4)"
+              ],
+              "size": 22.0,
+              "fg": [
+                255,
+                255,
+                255
+              ],
+              "bg": [
+                30,
+                41,
+                59
+              ],
+              "sel": [
+                37,
+                99,
+                235
+              ],
+              "mcu_len": 20
+            }
+          }
+        },
+        {
+          "name": "load",
+          "x": 668,
+          "y": 268,
+          "w": 100,
+          "h": 56,
+          "comment": "Key 0x0001: MCU reads VP_FILES and loads that row",
+          "kind": {
+            "Button": {
+              "text": "Load",
+              "size": 24.0,
+              "fg": [
+                255,
+                255,
+                255
+              ],
+              "bg": [
+                37,
+                99,
+                235
+              ],
+              "pressed_bg": [
+                29,
+                78,
+                216
+              ],
+              "radius": 10.0,
+              "image": null,
+              "goto": null,
+              "event": {
+                "Key": {
+                  "vp": null,
+                  "key": 1
+                }
+              },
+              "invisible": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "displays",
+      "bg": [
+        15,
+        23,
+        42
+      ],
+      "bg_image": null,
+      "swipe": [
+        1,
+        3
+      ],
+      "widgets": [
+        {
+          "name": "title2",
+          "x": 24,
+          "y": 14,
+          "w": 520,
+          "h": 44,
+          "comment": "",
+          "kind": {
+            "Label": {
+              "text": "3  Displays",
+              "size": 28.0,
+              "color": [
+                203,
+                213,
+                225
+              ]
+            }
+          }
+        },
+        {
+          "name": "prev2",
+          "x": 604,
+          "y": 14,
+          "w": 80,
+          "h": 44,
+          "comment": "Previous screen",
+          "kind": {
+            "Button": {
+              "text": "‹",
+              "size": 24.0,
+              "fg": [
+                255,
+                255,
+                255
+              ],
+              "bg": [
+                37,
+                99,
+                235
+              ],
+              "pressed_bg": [
+                29,
+                78,
+                216
+              ],
+              "radius": 10.0,
+              "image": null,
+              "goto": 1,
+              "event": "None",
+              "invisible": false
+            }
+          }
+        },
+        {
+          "name": "next2",
+          "x": 696,
+          "y": 14,
+          "w": 80,
+          "h": 44,
+          "comment": "Next screen",
+          "kind": {
+            "Button": {
+              "text": "›",
+              "size": 24.0,
+              "fg": [
+                255,
+                255,
+                255
+              ],
+              "bg": [
+                37,
+                99,
+                235
+              ],
+              "pressed_bg": [
+                29,
+                78,
+                216
+              ],
+              "radius": 10.0,
+              "image": null,
+              "goto": 3,
+              "event": "None",
+              "invisible": false
+            }
+          }
+        },
+        {
+          "name": "status",
+          "x": 24,
+          "y": 80,
+          "w": 360,
+          "h": 28,
+          "comment": "Status line from the MCU (32 bytes ASCII), on every screen",
+          "kind": {
+            "Text": {
+              "vp": 12288,
+              "len": 32,
+              "color": [
+                134,
+                239,
+                172
+              ],
+              "input": false,
+              "scroll": false,
+              "unicode": false
+            }
+          }
+        },
+        {
+          "name": "ticker",
+          "x": 24,
+          "y": 120,
+          "w": 360,
+          "h": 36,
+          "comment": "Marquee text that scrolls inside the box",
+          "kind": {
+            "Text": {
+              "vp": null,
+              "len": 40,
+              "color": [
+                250,
+                204,
+                21
+              ],
+              "input": false,
+              "scroll": true,
+              "unicode": false
+            }
+          }
+        },
+        {
+          "name": "greeting",
+          "x": 24,
+          "y": 164,
+          "w": 360,
+          "h": 36,
+          "comment": "Unicode text: MCU writes UTF-16BE (any language)",
+          "kind": {
+            "Text": {
+              "vp": null,
+              "len": 40,
+              "color": [
+                255,
+                255,
+                255
+              ],
+              "input": false,
+              "scroll": false,
+              "unicode": true
+            }
+          }
+        },
+        {
+          "name": "tank_label",
+          "x": 24,
+          "y": 212,
+          "w": 80,
+          "h": 30,
+          "comment": "",
+          "kind": {
+            "Label": {
+              "text": "Tank",
+              "size": 20.0,
+              "color": [
+                203,
+                213,
+                225
+              ]
+            }
+          }
+        },
+        {
+          "name": "tank",
+          "x": 104,
+          "y": 214,
+          "w": 280,
+          "h": 26,
+          "comment": "Progress bar 0..100",
+          "kind": {
+            "Progress": {
+              "vp": null,
+              "min": 0,
+              "max": 100,
+              "fg": [
+                34,
+                197,
+                94
+              ],
+              "bg": [
+                51,
+                65,
+                85
+              ],
+              "border": [
+                148,
+                163,
+                184
+              ],
+              "vertical": false
+            }
+          }
+        },
+        {
+          "name": "pressure",
+          "x": 24,
+          "y": 256,
+          "w": 200,
+          "h": 200,
+          "comment": "Gauge needle 0..100",
+          "kind": {
+            "Gauge": {
+              "vp": null,
+              "min": 0,
+              "max": 100,
+              "sweep": 270,
+              "needle": [
+                239,
+                68,
+                68
+              ],
+              "dial": [
+                148,
+                163,
+                184
+              ],
+              "knob": false
+            }
+          }
+        },
+        {
+          "name": "volume",
+          "x": 412,
+          "y": 76,
+          "w": 200,
+          "h": 200,
+          "comment": "Knob: turn by dragging, sends 0..100",
+          "kind": {
+            "Gauge": {
+              "vp": null,
+              "min": 0,
+              "max": 100,
+              "sweep": 270,
+              "needle": [
+                56,
+                139,
+                253
+              ],
+              "dial": [
+                148,
+                163,
+                184
+              ],
+              "knob": true
+            }
+          }
+        },
+        {
+          "name": "volume_bar",
+          "x": 640,
+          "y": 76,
+          "w": 30,
+          "h": 200,
+          "comment": "Vertical progress: MCU echoes the knob here",
+          "kind": {
+            "Progress": {
+              "vp": null,
+              "min": 0,
+              "max": 100,
+              "fg": [
+                56,
+                189,
+                248
+              ],
+              "bg": [
+                51,
+                65,
+                85
+              ],
+              "border": [
+                148,
+                163,
+                184
+              ],
+              "vertical": true
+            }
+          }
+        },
+        {
+          "name": "note2",
+          "x": 412,
+          "y": 300,
+          "w": 360,
+          "h": 28,
+          "comment": "",
+          "kind": {
+            "Label": {
+              "text": "Turn the knob: the MCU copies it to the bar",
+              "size": 16.0,
+              "color": [
+                203,
+                213,
+                225
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "graphics",
+      "bg": [
+        15,
+        23,
+        42
+      ],
+      "bg_image": null,
+      "swipe": [
+        2,
+        null
+      ],
+      "widgets": [
+        {
+          "name": "title3",
+          "x": 24,
+          "y": 14,
+          "w": 520,
+          "h": 44,
+          "comment": "",
+          "kind": {
+            "Label": {
+              "text": "4  Graphics",
+              "size": 28.0,
+              "color": [
+                203,
+                213,
+                225
+              ]
+            }
+          }
+        },
+        {
+          "name": "prev3",
+          "x": 604,
+          "y": 14,
+          "w": 80,
+          "h": 44,
+          "comment": "Previous screen",
+          "kind": {
+            "Button": {
+              "text": "‹",
+              "size": 24.0,
+              "fg": [
+                255,
+                255,
+                255
+              ],
+              "bg": [
+                37,
+                99,
+                235
+              ],
+              "pressed_bg": [
+                29,
+                78,
+                216
+              ],
+              "radius": 10.0,
+              "image": null,
+              "goto": 2,
+              "event": "None",
+              "invisible": false
+            }
+          }
+        },
+        {
+          "name": "trend",
+          "x": 24,
+          "y": 76,
+          "w": 480,
+          "h": 220,
+          "comment": "Chart channel 0: MCU pushes samples 0..100",
+          "kind": {
+            "Chart": {
+              "channel": 0,
+              "min": 0,
+              "max": 100,
+              "step": 2,
+              "color": [
+                56,
+                189,
+                248
+              ],
+              "bg": [
+                2,
+                6,
+                23
+              ]
+            }
+          }
+        },
+        {
+          "name": "qr",
+          "x": 560,
+          "y": 76,
+          "w": 160,
+          "h": 160,
+          "comment": "QR code of the text the MCU writes",
+          "kind": {
+            "Qr": {
+              "vp": null,
+              "len": 64,
+              "dot": 4
+            }
+          }
+        },
+        {
+          "name": "canvas",
+          "x": 24,
+          "y": 316,
+          "w": 480,
+          "h": 148,
+          "comment": "Drawing area: MCU writes basic-graphics commands",
+          "kind": {
+            "Drawing": {
+              "vp": null,
+              "words": 256,
+              "bg": [
+                2,
+                6,
+                23
+              ]
+            }
+          }
+        },
+        {
+          "name": "note3",
+          "x": 520,
+          "y": 316,
+          "w": 260,
+          "h": 28,
+          "comment": "",
+          "kind": {
+            "Label": {
+              "text": "MCU draws boxes here",
+              "size": 16.0,
+              "color": [
+                203,
+                213,
+                225
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "page_lib": 32,
+  "icon_lib": 48,
+  "font": null,
+  "cfg": null,
+  "unicode_lib": 24,
+  "unicode_max": 1327
+}

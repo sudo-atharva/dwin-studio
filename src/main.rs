@@ -15,6 +15,8 @@ use eframe::egui::{self, Color32, CollapsingHeader, Key, PointerButton, Pos2, Re
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+mod theme;
+
 const HANDLE: f32 = 10.0;
 const ACCENT: Color32 = Color32::from_rgb(56, 139, 253);
 const IMAGE_EXT: &[&str] = &["png", "jpg", "jpeg", "bmp"];
@@ -97,48 +99,11 @@ fn main() -> eframe::Result {
         "DWIN Studio",
         options,
         Box::new(|cc| {
-            cc.egui_ctx.set_theme(egui::ThemePreference::Dark);
-            cc.egui_ctx.style_mut_of(egui::Theme::Dark, theme);
-            Ok(Box::new(App::open(path)))
+            let app = App::open(path);
+            theme::apply(&cc.egui_ctx, &app.theme);
+            Ok(Box::new(app))
         }),
     )
-}
-
-/// VS Code / EEZ-like dark theme: neutral greys, one blue accent, roomier controls.
-fn theme(s: &mut egui::Style) {
-    use egui::{CornerRadius, FontId, TextStyle};
-    let mut v = egui::Visuals::dark();
-    let r = CornerRadius::same(5);
-    v.panel_fill = Color32::from_rgb(37, 37, 38);
-    v.window_fill = Color32::from_rgb(45, 45, 48);
-    v.faint_bg_color = Color32::from_rgb(42, 42, 44);
-    v.extreme_bg_color = Color32::from_rgb(28, 28, 30);
-    v.code_bg_color = Color32::from_rgb(30, 30, 30);
-    v.hyperlink_color = ACCENT;
-    v.selection.bg_fill = Color32::from_rgb(9, 71, 113);
-    v.selection.stroke = Stroke::new(1.0, Color32::WHITE);
-    v.window_corner_radius = CornerRadius::same(8);
-    v.window_stroke = Stroke::new(1.0, Color32::from_rgb(60, 60, 64));
-    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(52, 52, 56));
-    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, Color32::from_rgb(204, 204, 204));
-    v.widgets.inactive.weak_bg_fill = Color32::from_rgb(58, 58, 62);
-    v.widgets.inactive.bg_fill = Color32::from_rgb(58, 58, 62);
-    v.widgets.inactive.fg_stroke = Stroke::new(1.0, Color32::from_rgb(220, 220, 220));
-    v.widgets.hovered.weak_bg_fill = Color32::from_rgb(72, 72, 78);
-    v.widgets.hovered.bg_stroke = Stroke::new(1.0, Color32::from_rgb(90, 90, 98));
-    v.widgets.active.weak_bg_fill = Color32::from_rgb(9, 71, 113);
-    for w in [&mut v.widgets.noninteractive, &mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open] {
-        w.corner_radius = r;
-    }
-    s.visuals = v;
-    s.spacing.item_spacing = Vec2::new(8.0, 6.0);
-    s.spacing.button_padding = Vec2::new(10.0, 4.0);
-    s.spacing.interact_size.y = 24.0;
-    s.spacing.window_margin = egui::Margin::same(10);
-    for (t, size) in [(TextStyle::Body, 13.5), (TextStyle::Button, 13.5), (TextStyle::Heading, 17.0), (TextStyle::Small, 11.0)] {
-        s.text_styles.insert(t, FontId::proportional(size));
-    }
-    s.text_styles.insert(TextStyle::Monospace, FontId::monospace(12.5));
 }
 
 /// Small rounded label on the canvas (positions, sizes).
@@ -205,6 +170,9 @@ struct App {
     ports: Vec<String>,
     port_name: String,
     baud: u32,
+    /// Editor colors; `themes` = built-ins + themes/*.json, re-read when the picker opens.
+    theme: theme::Theme,
+    themes: Vec<theme::Theme>,
 }
 
 impl App {
@@ -221,6 +189,8 @@ impl App {
             drag: None,
             show_pressed: false,
             show_grid: true,
+            themes: theme::load_all(),
+            theme: theme::builtin()[0].clone(),
             guides: (vec![], vec![]),
             cursor: None,
             warn_count: 0,
@@ -240,6 +210,10 @@ impl App {
             port_name: String::new(),
             baud: 115200,
         };
+        let saved = theme::saved_name();
+        if let Some(t) = app.themes.iter().find(|t| t.name == saved) {
+            app.theme = t.clone();
+        }
         if let Some(p) = path {
             app.load(p);
         }
@@ -537,6 +511,31 @@ impl App {
         self.thumbs.get(rel).map(|t| t.id())
     }
 
+    fn theme_picker(&mut self, ui: &mut egui::Ui) {
+        let mut picked = None;
+        let resp = egui::ComboBox::from_id_salt("theme").selected_text(format!("◐ {}", self.theme.name)).show_ui(ui, |ui| {
+            for t in &self.themes {
+                if ui.selectable_label(t.name == self.theme.name, &t.name).clicked() {
+                    picked = Some(t.clone());
+                }
+            }
+            ui.separator();
+            if ui.button("Open themes folder…").on_hover_text("Add a theme: drop a .json file there (see README.txt)").clicked() {
+                let _ = std::process::Command::new("explorer").arg(theme::dir()).spawn();
+            }
+        });
+        if resp.response.clicked() {
+            // Pick up themes added or edited (by hand or by an AI agent) since last time.
+            self.themes = theme::load_all();
+            picked = picked.or_else(|| self.themes.iter().find(|t| t.name == self.theme.name && **t != self.theme).cloned());
+        }
+        if let Some(t) = picked {
+            theme::apply(ui.ctx(), &t);
+            theme::save_name(&t.name);
+            self.theme = t;
+        }
+    }
+
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.label(RichText::new("DWIN Studio").strong().color(ACCENT));
@@ -581,6 +580,8 @@ impl App {
                 self.do_build();
             }
             ui.separator();
+            self.theme_picker(ui);
+            ui.separator();
             if self.sim.is_some() {
                 self.com_controls(ui);
                 return;
@@ -613,7 +614,7 @@ impl App {
     /// VS Code-style status bar: mode, screen, selection | cursor, zoom, warnings, last message.
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         let sim = self.sim.is_some();
-        let fill = if sim { Color32::from_rgb(22, 130, 70) } else { Color32::from_rgb(0, 102, 184) };
+        let fill = theme::c(if sim { self.theme.status_sim } else { self.theme.status_edit });
         let frame = egui::Frame::new().fill(fill).inner_margin(egui::Margin::symmetric(10, 3));
         egui::Panel::bottom("status").frame(frame).show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -649,7 +650,7 @@ impl App {
         ui.horizontal(|ui| {
             for (i, p) in self.project.pages.iter().enumerate() {
                 let on = self.page == i;
-                let text = RichText::new(format!("▣ {}", p.name)).color(if on { Color32::WHITE } else { Color32::from_gray(160) });
+                let text = RichText::new(format!("▣ {}", p.name)).color(if on { Color32::WHITE } else { ui.visuals().weak_text_color() });
                 if ui.add(egui::Button::new(text).selected(on).corner_radius(egui::CornerRadius { nw: 5, ne: 5, sw: 0, se: 0 })).clicked() {
                     self.page = i;
                     self.selected.clear();
@@ -778,7 +779,7 @@ impl App {
         }
         self.rendered = None; // editor view re-renders when we leave
         let painter = ui.painter_at(area);
-        painter.rect_filled(area, 0.0, Color32::from_gray(24));
+        painter.rect_filled(area, 0.0, theme::c(self.theme.canvas));
         if let Some(t) = &self.texture {
             painter.image(t.id(), rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
         }
@@ -1556,7 +1557,7 @@ impl App {
             self.rendered = Some(key);
         }
         let painter = ui.painter_at(area);
-        painter.rect_filled(area, 0.0, Color32::from_rgb(30, 30, 30));
+        painter.rect_filled(area, 0.0, theme::c(self.theme.canvas));
         // Soft shadow under the screen.
         for (grow, alpha) in [(14.0, 18), (8.0, 30), (3.0, 60)] {
             painter.rect_filled(rect.translate(Vec2::new(0.0, 4.0)).expand(grow), grow, Color32::from_black_alpha(alpha));
@@ -1833,7 +1834,7 @@ fn kind_icon(k: &WidgetKind) -> &'static str {
         WidgetKind::Slider { .. } => "━",
         WidgetKind::Icons { .. } => "◈",
         WidgetKind::Dropdown { .. } => "▾",
-        WidgetKind::List { .. } => "☰",
+        WidgetKind::List { .. } => "≡",
         WidgetKind::Roller { .. } => "⇕",
         WidgetKind::Clock { .. } => "◷",
         WidgetKind::Qr { .. } => "▦",
