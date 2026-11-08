@@ -130,7 +130,7 @@ impl Sim {
     fn interactive(w: &Widget) -> bool {
         matches!(
             w.kind,
-            WidgetKind::Button { .. } | WidgetKind::Toggle { .. } | WidgetKind::Slider { .. } | WidgetKind::Dropdown { .. } | WidgetKind::List { .. }
+            WidgetKind::Button { .. } | WidgetKind::Toggle { .. } | WidgetKind::Slider { .. } | WidgetKind::Dropdown { .. } | WidgetKind::List { .. } | WidgetKind::Roller { .. }
                 | WidgetKind::Gauge { knob: true, .. }
                 | WidgetKind::Number { input: Some(_), .. } | WidgetKind::Text { input: true, .. }
         )
@@ -278,6 +278,18 @@ impl Sim {
                 self.send(vp?);
             }
             WidgetKind::Slider { .. } | WidgetKind::Gauge { .. } => self.drag(p, x, y),
+            WidgetKind::Roller { items, wrap, .. } => {
+                let n = items.len().max(1) as i32;
+                let step = match (y - w.y) * 3 / w.h.max(1) {
+                    0 => -1,
+                    2 => 1,
+                    _ => return None,
+                };
+                let v = self.get(vp?) as i32 + step;
+                let v = if *wrap { v.rem_euclid(n) } else { v.clamp(0, n - 1) };
+                self.set(vp?, v as u16);
+                self.send(vp?);
+            }
             WidgetKind::List { items, .. } => {
                 let row = (y - w.y) * items.len().max(1) as i32 / w.h.max(1);
                 self.set(vp?, row as u16 + 1);
@@ -477,7 +489,7 @@ impl Sim {
                     draw_state(&mut px, w, (v >> (b % 16) & 1) as usize, base)
                 }
                 WidgetKind::Toggle { .. } | WidgetKind::Lamp { .. } => draw_state(&mut px, w, (v != 0) as usize, base),
-                WidgetKind::Icons { .. } | WidgetKind::Dropdown { .. } | WidgetKind::List { .. } => draw_state(&mut px, w, v as usize, base),
+                WidgetKind::Icons { .. } | WidgetKind::Dropdown { .. } | WidgetKind::List { .. } | WidgetKind::Roller { .. } => draw_state(&mut px, w, v as usize, base),
                 WidgetKind::Animation { images, period_ms, .. } => {
                     let n = images.len().max(1) as u64;
                     let f = if v == 1 { ms / (*period_ms).max(8) as u64 % n } else { 0 };
@@ -498,7 +510,7 @@ impl Sim {
                     });
                     text(&mut px, &s, x, y, hh, *color);
                 }
-                WidgetKind::Clock { format, color } => text(&mut px, &clock(format), x, y, hh, *color),
+                WidgetKind::Clock { format, color, .. } => text(&mut px, &clock(format), x, y, hh, *color),
                 WidgetKind::Progress { min, max, fg, bg, border, vertical, .. } => {
                     let f = frac(*min as f32, *max as f32);
                     rounded(&mut px, (x, y, ww, hh), 0.0, *border);

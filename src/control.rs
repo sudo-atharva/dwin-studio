@@ -63,6 +63,11 @@ pub static TOUCH_KINDS: &[Kind] = &[
     Kind { code: 0x03, name: "slider", size: 32, fields: fields![
         vp@17:2, adj_mode@19:1, x0@20:2, y0@22:2, x1@24:2, y1@26:2, v_begin@28:2, v_end@30:2,
     ]},
+    // Set the screen clock from a keypad (same keyboard fields as var_input).
+    Kind { code: 0x04, name: "rtc_input", size: 48, fields: fields![
+        show_x@20:2, show_y@22:2, color@24:2, lib@26:1, font@27:1, cursor_color@28:1, kb_source@29:1,
+        kb_page@30:2, kb_x0@33:2, kb_y0@35:2, kb_x1@37:2, kb_y1@39:2, kb_pos_x@41:2, kb_pos_y@43:2,
+    ]},
     Kind { code: 0x05, name: "return_key", size: 32, fields: fields![
         vp@17:2, vp_mode@19:1, key@20:2, hold@22:1,
     ]},

@@ -73,6 +73,7 @@ pub fn allocate(p: &Project) -> (Vec<Alloc>, Vec<String>) {
                 WidgetKind::Icons { .. } => (1, false, "icons"),
                 WidgetKind::Dropdown { .. } => (1, false, "dropdown"),
                 WidgetKind::List { .. } => (1, false, "list"),
+                WidgetKind::Roller { .. } => (1, false, "roller"),
                 WidgetKind::Qr { len, .. } => (len.div_ceil(2) + 1, false, "qr"),
                 WidgetKind::Progress { .. } => (1, false, "progress"),
                 WidgetKind::Gauge { .. } => (1, false, "gauge"),
@@ -289,7 +290,7 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
         extras.push(e);
         (npages + extras.len() - 1, area)
     };
-    let kpad = uses(&|k| matches!(k, WidgetKind::Number { input: Some(_), .. })).then(|| add(keypad(sw, sh)));
+    let kpad = uses(&|k| matches!(k, WidgetKind::Number { input: Some(_), .. } | WidgetKind::Clock { settable: true, .. })).then(|| add(keypad(sw, sh)));
     let kbd = uses(&|k| matches!(k, WidgetKind::Text { input: true, .. })).then(|| add(keyboard(sw, sh)));
     let mut menus = BTreeMap::new();
     for (pi, page) in p.pages.iter().enumerate() {
@@ -440,8 +441,10 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                 | WidgetKind::Icons { .. }
                 | WidgetKind::Dropdown { .. }
                 | WidgetKind::Animation { .. }
-                | WidgetKind::List { .. } => {
+                | WidgetKind::List { .. }
+                | WidgetKind::Roller { .. } => {
                     let states = match &w.kind {
+                        WidgetKind::Roller { items, .. } => items.len().max(1),
                         WidgetKind::List { items, .. } => items.len() + 1,
                         WidgetKind::Icons { images, .. } | WidgetKind::Animation { images, .. } => images.len().max(1),
                         WidgetKind::Dropdown { options, .. } => options.len().max(1),
@@ -502,6 +505,22 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                             rec.set_params(kind(TOUCH_KINDS, "increment"), &params);
                             touch.push(rec);
                         }
+                        WidgetKind::Roller { items, wrap, .. } => {
+                            // Top third steps back, bottom third forward (DGUS increment).
+                            let third = w.h / 3;
+                            for (dy, up) in [(0, 0), (2 * third, 1)] {
+                                let mut part = w.clone();
+                                (part.y, part.h) = (w.y + dy, third);
+                                let (x0, y0, x1, y1) = corners(&part, p.width, p.height);
+                                let mut r = TouchRecord { page_raw: pi as u16, x0, y0, x1, y1, next_page: NONE, pressed_page: NONE, code: 0, ext: vec![] };
+                                let params: Params = vec![
+                                    ("vp", vp()), ("adj_mode", n(up)), ("return_mode", n(*wrap as u32)), ("step", n(1)),
+                                    ("min", n(0)), ("max", n(items.len().max(1) as u32 - 1)),
+                                ];
+                                r.set_params(kind(TOUCH_KINDS, "increment"), &params);
+                                touch.push(r);
+                            }
+                        }
                         WidgetKind::List { items, .. } => {
                             // One key per row: row i sends i + 1.
                             let rh = w.h / items.len().max(1) as i32;
@@ -555,12 +574,24 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                     ];
                     shows.push(show_record(kind(SHOW_KINDS, "graphics"), &params));
                 }
-                WidgetKind::Clock { format, color } => {
+                WidgetKind::Clock { format, color, settable } => {
                     let params: Params = vec![
                         ("sp", n(0xFFFF)), ("x", n(x0)), ("y", n(y0)), ("color", n(rgb565(*color))),
                         ("font_size", n((w.h / 2).clamp(1, 255) as u32)), ("format", Value::Text(format.clone())),
                     ];
                     shows.push(show_record(kind(SHOW_KINDS, "rtc_text"), &params));
+                    if let (true, Some((kp, area))) = (*settable, kpad) {
+                        let (kx, ky, kw, kh) = area;
+                        let (pos_x, pos_y) = keypad_pos(w, area, sw);
+                        let params: Params = vec![
+                            ("show_x", n(x0)), ("show_y", n(y0)), ("color", n(rgb565(*color))), ("font", n((w.h / 2).clamp(1, 255) as u32)),
+                            ("cursor_color", n(cursor(*color))), ("kb_source", n(1)), ("kb_page", n(kp as u32)),
+                            ("kb_x0", n(kx as u32)), ("kb_y0", n(ky as u32)), ("kb_x1", n((kx + kw - 1) as u32)), ("kb_y1", n((ky + kh - 1) as u32)),
+                            ("kb_pos_x", n(pos_x as u32)), ("kb_pos_y", n(pos_y as u32)),
+                        ];
+                        rec.set_params(kind(TOUCH_KINDS, "rtc_input"), &params);
+                        touch.push(rec);
+                    }
                 }
                 WidgetKind::Qr { dot, .. } => {
                     let params: Params = vec![
@@ -779,6 +810,10 @@ fn describe(p: &Project, w: &Widget, a: Option<&Alloc>) -> Option<String> {
         WidgetKind::Lamp { .. } => format!("LAMP    VP {:#06x}: 0 off / 1 on", vp()),
         WidgetKind::Slider { min, max, .. } => format!("SLIDER  VP {:#06x} = {min}..{max}; drag sends it, MCU write moves knob", vp()),
         WidgetKind::Icons { images, .. } => format!("ICONS   VP {:#06x} = 0..{} picks the picture", vp(), images.len().max(1) - 1),
+        WidgetKind::Roller { items, .. } => {
+            let list: Vec<_> = items.iter().enumerate().map(|(i, o)| format!("{i}={o}")).collect();
+            format!("ROLLER  VP {:#06x}: {}; tap above/below the middle steps and sends it", vp(), list.join(", "))
+        }
         WidgetKind::List { items, .. } => {
             let list: Vec<_> = items.iter().enumerate().map(|(i, o)| format!("{}={o}", i + 1)).collect();
             format!("LIST    VP {:#06x}: 0 = none, {}; tap sends it (pair with an OK button)", vp(), list.join(", "))
@@ -787,8 +822,9 @@ fn describe(p: &Project, w: &Widget, a: Option<&Alloc>) -> Option<String> {
             let list: Vec<_> = options.iter().enumerate().map(|(i, o)| format!("{i}={o}")).collect();
             format!("DROPDOWN VP {:#06x}: {}; picking sends it", vp(), list.join(", "))
         }
-        WidgetKind::Clock { format, .. } => {
-            format!("CLOCK   \"{format}\"; set time: 5A A5 0B 82 00 9C 5A A5 <YY MM DD hh mm ss> (check your T5L manual)")
+        WidgetKind::Clock { format, settable, .. } => {
+            let set = if *settable { "; tap sets it with the keypad" } else { "" };
+            format!("CLOCK   \"{format}\"; set time: 5A A5 0B 82 00 9C 5A A5 <YY MM DD hh mm ss> (check your T5L manual){set}")
         }
         WidgetKind::Qr { len, .. } => format!("QR      VP {:#06x}: write up to {len} bytes of text, then FF FF", vp()),
         WidgetKind::Progress { min, max, .. } => format!("PROGRESS VP {:#06x} = {min}..{max}", vp()),
@@ -986,6 +1022,19 @@ mod tests {
         let rows: Vec<_> = out.set.touch.as_ref().unwrap().records.iter().filter(|r| r.page() == 1).map(|r| r.params().unwrap()).collect();
         assert_eq!(rows.len(), 4);
         assert!(rows[3].contains(&("key", Value::Num(4))));
+        // Roller: two increments (back / forward), wrapping over 12 items; settable clock uses the keypad.
+        let mut p3 = sample();
+        let mut clock = palette("Clock");
+        if let WidgetKind::Clock { settable, .. } = &mut clock {
+            *settable = true;
+        }
+        p3.pages[1].widgets = vec![Widget::new(palette("Roller"), "month", 10, 10), Widget::new(clock, "clk", 10, 300)];
+        let out3 = build(&p3, Path::new(".")).unwrap();
+        let t3: Vec<_> = out3.set.touch.as_ref().unwrap().records.iter().filter(|r| r.page() == 1).collect();
+        let names: Vec<_> = t3.iter().map(|r| r.kind().unwrap().name).collect();
+        assert_eq!(names, ["increment", "increment", "rtc_input"]);
+        assert!(t3[1].params().unwrap().contains(&("max", Value::Num(11))));
+        assert!(t3[2].params().unwrap().contains(&("kb_page", Value::Num(2))));
         // Unicode text: own .dzk of its size from library 24, records point at it.
         let mut p2 = sample();
         p2.pages[1].widgets.push(Widget::new(palette("Unicode Text"), "greet", 10, 300));

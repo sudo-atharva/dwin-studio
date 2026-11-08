@@ -221,6 +221,21 @@ pub fn draw_state(px: &mut Pixmap, w: &Widget, state: usize, base: &Path) {
                 text(px, it, x + 12.0, ry + (rh - size) / 2.0, *size, *fg);
             }
         }
+        WidgetKind::Roller { items, size, fg, bg, .. } => {
+            // Three rows: previous (dim), current (bright, in a band), next (dim).
+            let (x, y, ww, hh) = frect(w);
+            let rh = hh / 3.0;
+            rounded(px, (x, y, ww, hh), 10.0, *bg);
+            let band = [bg[0].saturating_add(25), bg[1].saturating_add(25), bg[2].saturating_add(25)];
+            rounded(px, (x + 4.0, y + rh, ww - 8.0, rh), 8.0, band);
+            let n = items.len().max(1);
+            let dim = [fg[0] / 2, fg[1] / 2, fg[2] / 2];
+            for (row, off, c, s) in [(0.0, n - 1, dim, size * 0.8), (1.0, 0, *fg, *size), (2.0, 1, dim, size * 0.8)] {
+                if let Some(t) = items.get((state + off) % n) {
+                    centered(px, (x, y + row * rh, ww, rh), t, s, c);
+                }
+            }
+        }
         WidgetKind::Dropdown { options, size, fg, .. } => {
             let t = options.get(state).map_or("", |s| s.as_str());
             text(px, t, w.x as f32 + 12.0, w.y as f32 + (w.h as f32 - size) / 2.0, *size, *fg);
@@ -312,7 +327,7 @@ pub fn render(page: &Page, width: u16, height: u16, mode: Mode, base: &Path) -> 
                     line(&mut px, &[(cx, cy), polar(cx, cy, len, start)], nw, *needle);
                 }
             }
-            WidgetKind::Clock { format, color } if mode == Mode::Preview => {
+            WidgetKind::Clock { format, color, .. } if mode == Mode::Preview => {
                 let s: String = format
                     .chars()
                     .map(|c| match c {
@@ -340,6 +355,7 @@ pub fn render(page: &Page, width: u16, height: u16, mode: Mode, base: &Path) -> 
                 rounded(&mut px, r, 0.0, *fg);
             }
             WidgetKind::Toggle { .. } | WidgetKind::Lamp { .. } | WidgetKind::Icons { .. } | WidgetKind::Animation { .. } | WidgetKind::List { .. }
+                | WidgetKind::Roller { .. }
                 if dynamic =>
             {
                 draw_state(&mut px, w, 0, base)

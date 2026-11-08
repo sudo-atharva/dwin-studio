@@ -163,10 +163,19 @@ pub enum WidgetKind {
     /// Items stacked in rows. Tapping row i highlights it and sends VP = i + 1 (0 = none
     /// selected), so a separate "OK" button can act on the choice.
     List { vp: Option<u16>, items: Vec<String>, size: f32, fg: Rgb, bg: Rgb, sel: Rgb },
+    /// Picker wheel: shows previous / current / next item; tapping above or below the
+    /// middle steps VP (0..n-1) and sends it. `wrap`: past the end goes back to the start.
+    Roller { vp: Option<u16>, items: Vec<String>, size: f32, fg: Rgb, bg: Rgb, wrap: bool },
     /// Tap opens a list; picking item i writes i to VP and shows it in the box.
     Dropdown { vp: Option<u16>, options: Vec<String>, size: f32, fg: Rgb, bg: Rgb },
     /// Screen's real-time clock. `format`: Y M D H Q(minute) S W(weekday), other chars as-is.
-    Clock { format: String, color: Rgb },
+    /// `settable`: tapping opens the keypad to set the screen's clock (DGUS RTC input).
+    Clock {
+        format: String,
+        color: Rgb,
+        #[serde(default)]
+        settable: bool,
+    },
     /// QR code of the text at VP (end it with 0xFFFF). `dot` = pixels per module.
     Qr { vp: Option<u16>, len: u16, dot: u8 },
     /// Bar filled from VP between min and max, drawn by the screen.
@@ -214,6 +223,7 @@ impl WidgetKind {
             | WidgetKind::Icons { vp, .. }
             | WidgetKind::Dropdown { vp, .. }
             | WidgetKind::List { vp, .. }
+            | WidgetKind::Roller { vp, .. }
             | WidgetKind::Qr { vp, .. }
             | WidgetKind::Progress { vp, .. }
             | WidgetKind::Gauge { vp, .. }
@@ -243,6 +253,7 @@ impl Widget {
             WidgetKind::Icons { .. } => (64, 64),
             WidgetKind::Dropdown { .. } => (200, 44),
             WidgetKind::List { .. } => (260, 180),
+            WidgetKind::Roller { .. } => (160, 150),
             WidgetKind::Clock { .. } => (320, 32),
             WidgetKind::Qr { .. } => (120, 120),
             WidgetKind::Progress { .. } => (300, 24),
@@ -268,6 +279,7 @@ impl Widget {
             WidgetKind::Icons { .. } => "Icons",
             WidgetKind::Dropdown { .. } => "Dropdown",
             WidgetKind::List { .. } => "List",
+            WidgetKind::Roller { .. } => "Roller",
             WidgetKind::Clock { .. } => "Clock",
             WidgetKind::Qr { .. } => "QR Code",
             WidgetKind::Progress { .. } => "Progress",
@@ -320,13 +332,16 @@ pub fn default_widgets() -> Vec<(&'static str, WidgetKind)> {
             vp: None, items: vec!["Program 1".into(), "Program 2".into(), "Program 3".into(), "Program 4".into()],
             size: 22.0, fg: [255; 3], bg: [30, 41, 59], sel: [37, 99, 235],
         }),
+        ("Roller", WidgetKind::Roller {
+            vp: None, items: (1..=12).map(|m| format!("{m:02}")).collect(), size: 28.0, fg: [255; 3], bg: [30, 41, 59], wrap: true,
+        }),
         ("Progress", WidgetKind::Progress {
             vp: None, min: 0, max: 100, fg: [34, 197, 94], bg: [51, 65, 85], border: [148, 163, 184], vertical: false,
         }),
         ("Gauge", WidgetKind::Gauge { vp: None, min: 0, max: 100, sweep: 270, needle: [239, 68, 68], dial: [148, 163, 184], knob: false }),
         ("Knob", WidgetKind::Gauge { vp: None, min: 0, max: 100, sweep: 270, needle: [56, 139, 253], dial: [148, 163, 184], knob: true }),
         ("Chart", WidgetKind::Chart { channel: 0, min: 0, max: 100, step: 2, color: [56, 189, 248], bg: [2, 6, 23] }),
-        ("Clock", WidgetKind::Clock { format: "Y-M-D H:Q:S".into(), color: [255; 3] }),
+        ("Clock", WidgetKind::Clock { format: "Y-M-D H:Q:S".into(), color: [255; 3], settable: false }),
         ("QR Code", WidgetKind::Qr { vp: None, len: 64, dot: 4 }),
         ("Drawing", WidgetKind::Drawing { vp: None, words: 256, bg: [2, 6, 23] }),
         ("Animation", WidgetKind::Animation { vp: None, images: vec![], period_ms: 200, autoplay: true }),

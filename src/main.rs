@@ -1160,6 +1160,20 @@ impl App {
                     ui.checkbox(unicode, "any language (unicode)").on_hover_text("MCU sends UTF-16. Range and font: PROJECT panel");
                     ui.end_row();
                 }
+                WidgetKind::Roller { items, size, fg, bg, wrap, .. } => {
+                    ui.label("Items\n(one per line)");
+                    let mut s = items.join("\n");
+                    if ui.add(egui::TextEdit::multiline(&mut s).desired_rows(5)).changed() {
+                        *items = s.lines().map(str::to_string).collect();
+                    }
+                    ui.end_row();
+                    size_row(ui, size);
+                    color_row(ui, "Text color", fg);
+                    color_row(ui, "Fill", bg);
+                    ui.label("Ends");
+                    ui.checkbox(wrap, "wrap around");
+                    ui.end_row();
+                }
                 WidgetKind::List { items, size, fg, bg, sel, .. } => {
                     ui.label("Items\n(one per line)");
                     let mut s = items.join("\n");
@@ -1186,12 +1200,15 @@ impl App {
                     color_row(ui, "Text color", fg);
                     color_row(ui, "Fill", bg);
                 }
-                WidgetKind::Clock { format, color } => {
+                WidgetKind::Clock { format, color, settable } => {
                     text_row(ui, "Format", format);
                     ui.label("");
                     ui.label(RichText::new("Y year · M month · D day\nH hour · Q minute · S second · W weekday").small().weak());
                     ui.end_row();
                     color_row(ui, "Color", color);
+                    ui.label("Touch");
+                    ui.checkbox(settable, "tap to set the time");
+                    ui.end_row();
                 }
                 WidgetKind::Qr { len, dot, .. } => {
                     drag_row(ui, "Max bytes", len, 1..=458);
@@ -1594,6 +1611,7 @@ fn kind_icon(k: &WidgetKind) -> &'static str {
         WidgetKind::Icons { .. } => "◈",
         WidgetKind::Dropdown { .. } => "▾",
         WidgetKind::List { .. } => "☰",
+        WidgetKind::Roller { .. } => "⇕",
         WidgetKind::Clock { .. } => "◷",
         WidgetKind::Qr { .. } => "▦",
         WidgetKind::Progress { .. } => "▬",
@@ -1607,7 +1625,7 @@ fn kind_icon(k: &WidgetKind) -> &'static str {
 /// Palette groups, EEZ-style. Names match `default_widgets()`; anything new lands in "More".
 const GROUPS: &[(&str, &[&str])] = &[
     ("Basic", &["Label", "Panel", "Button", "+ / − Button"]),
-    ("Input", &["Number Input", "Text Input", "Toggle", "Slider", "Knob", "Dropdown", "List"]),
+    ("Input", &["Number Input", "Text Input", "Toggle", "Slider", "Knob", "Dropdown", "List", "Roller"]),
     ("Display", &["Number", "Big Number", "Text", "Unicode Text", "Scrolling Text", "Lamp", "Icons", "Progress", "Gauge", "Clock", "QR Code"]),
     ("Graphics", &["Chart", "Drawing", "Animation"]),
 ];

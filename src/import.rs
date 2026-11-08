@@ -119,7 +119,7 @@ pub fn import(dir: &Path, project_dir: &Path) -> Result<(Project, Vec<String>), 
                         _ => "Y-M-D H:Q:S".into(),
                     };
                     let f = num(&p, "font_size");
-                    let kind = WidgetKind::Clock { format: fmt.clone(), color: rgb(num(&p, "color")) };
+                    let kind = WidgetKind::Clock { format: fmt.clone(), color: rgb(num(&p, "color")), settable: false };
                     widget(kind, format!("clock{pid}"), x, y, f * fmt.len() as u32, 2 * f, String::new())
                 }
                 "progress_bar" => {
