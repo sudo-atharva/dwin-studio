@@ -221,11 +221,13 @@ pub fn render(page: &Page, width: u16, height: u16, mode: Mode, base: &Path) -> 
                 }
                 centered(&mut px, frect(w), t, *size, *fg);
             }
-            WidgetKind::Slider { track, .. } => {
+            WidgetKind::Slider { track, show_track, .. } => {
                 // Track is static; the knob is an icon the screen moves.
                 let (x, y, ww, hh) = frect(w);
                 let th = (hh / 4.0).max(2.0);
-                rounded(&mut px, (x + hh / 2.0, y + (hh - th) / 2.0, ww - hh, th), th / 2.0, *track);
+                if *show_track {
+                    rounded(&mut px, (x + hh / 2.0, y + (hh - th) / 2.0, ww - hh, th), th / 2.0, *track);
+                }
                 // Knob only in the editor: on screen it is an icon; a baked one would stay behind.
                 if mode == Mode::Preview {
                     draw_state(&mut px, w, 0, base);

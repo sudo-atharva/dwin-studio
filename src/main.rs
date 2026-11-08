@@ -54,7 +54,7 @@ fn main() -> eframe::Result {
     }
     let path = args.get(1).map(PathBuf::from);
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1480.0, 900.0]),
+        viewport: egui::ViewportBuilder::default().with_inner_size([1480.0, 900.0]).with_maximized(true),
         ..Default::default()
     };
     eframe::run_native(
@@ -459,6 +459,12 @@ impl App {
                 self.do_build();
             }
             ui.separator();
+            if self.sim.is_some() {
+                self.com_controls(ui);
+                ui.separator();
+                ui.label(RichText::new(&self.status).weak());
+                return;
+            }
             // Align / distribute
             for (icon, how, tip) in [
                 ("⇤", Align::Left, "Align left"), ("↔", Align::HCenter, "Center horizontally"), ("⇥", Align::Right, "Align right"),
@@ -624,33 +630,38 @@ impl App {
     }
 
     /// Bottom panel in Simulate mode: COM port + UART log.
+    /// COM port picker: the PC plays the HMI screen for the MCU board on this port.
+    fn com_controls(&mut self, ui: &mut egui::Ui) {
+        ui.strong("🔌 COM");
+        let shown = if self.port_name.is_empty() { "(no port)".to_string() } else { self.port_name.clone() };
+        egui::ComboBox::from_id_salt("port").selected_text(shown).show_ui(ui, |ui| {
+            for p in &self.ports {
+                ui.selectable_value(&mut self.port_name, p.clone(), p);
+            }
+        });
+        if ui.small_button("⟳").on_hover_text("Rescan COM ports").clicked() {
+            self.refresh_ports();
+        }
+        egui::ComboBox::from_id_salt("baud").selected_text(self.baud.to_string()).show_ui(ui, |ui| {
+            for b in [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600] {
+                ui.selectable_value(&mut self.baud, b, b.to_string());
+            }
+        });
+        if self.port.is_some() {
+            if ui.button("Disconnect").clicked() {
+                (self.port, self.port_rx) = (None, None);
+                self.status = "Serial disconnected".into();
+            }
+            ui.label(RichText::new("● connected").color(Color32::from_rgb(34, 197, 94)));
+        } else if ui.add_enabled(!self.port_name.is_empty(), egui::Button::new("Connect")).clicked() {
+            self.connect(&ui.ctx().clone());
+        }
+    }
+
     fn sim_panel(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.strong("UART");
-            let shown = if self.port_name.is_empty() { "(no port)".to_string() } else { self.port_name.clone() };
-            egui::ComboBox::from_id_salt("port").selected_text(shown).show_ui(ui, |ui| {
-                for p in &self.ports {
-                    ui.selectable_value(&mut self.port_name, p.clone(), p);
-                }
-            });
-            if ui.small_button("⟳").on_hover_text("Rescan COM ports").clicked() {
-                self.refresh_ports();
-            }
-            egui::ComboBox::from_id_salt("baud").selected_text(self.baud.to_string()).show_ui(ui, |ui| {
-                for b in [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600] {
-                    ui.selectable_value(&mut self.baud, b, b.to_string());
-                }
-            });
-            if self.port.is_some() {
-                if ui.button("Disconnect").clicked() {
-                    (self.port, self.port_rx) = (None, None);
-                    self.status = "Serial disconnected".into();
-                }
-                ui.label(RichText::new("● connected").color(Color32::from_rgb(34, 197, 94)));
-            } else if ui.add_enabled(!self.port_name.is_empty(), egui::Button::new("Connect")).clicked() {
-                self.connect(&ui.ctx().clone());
-            }
-            ui.label(RichText::new("Any USB-UART adapter: wire it to your MCU's screen UART; this window is the screen.").weak());
+            ui.strong("UART log");
+            ui.label(RichText::new("Connect your MCU board with any USB-UART adapter (COM in the toolbar): this window is its screen.").weak());
             if ui.small_button("Clear").clicked() {
                 if let Some(s) = &mut self.sim {
                     s.log.clear();
@@ -1093,10 +1104,15 @@ impl App {
                     color_row(ui, "Off", off);
                     bit_row(ui, bit);
                 }
-                WidgetKind::Slider { min, max, track, knob, .. } => {
+                WidgetKind::Slider { min, max, track, knob, show_track, .. } => {
                     drag_row(ui, "Min", min, 0..=65535);
                     drag_row(ui, "Max", max, 0..=65535);
-                    color_row(ui, "Track", track);
+                    ui.label("Bar");
+                    ui.checkbox(show_track, "show bar").on_hover_text("Off = transparent: only the knob is drawn");
+                    ui.end_row();
+                    if *show_track {
+                        color_row(ui, "Track", track);
+                    }
                     color_row(ui, "Knob", knob);
                     ui.label("Knob size");
                     ui.label("= height (H)");

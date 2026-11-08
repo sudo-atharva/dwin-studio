@@ -105,7 +105,16 @@ pub enum WidgetKind {
     /// Status light: on when VP (or bit `bit` of VP) is set.
     Lamp { vp: Option<u16>, bit: Option<u8>, on: Rgb, off: Rgb },
     /// Horizontal slider. Dragging writes min..max to VP; MCU writes move the knob.
-    Slider { vp: Option<u16>, min: u16, max: u16, track: Rgb, knob: Rgb },
+    /// `show_track` false = no bar drawn (only the knob; background shows through).
+    Slider {
+        vp: Option<u16>,
+        min: u16,
+        max: u16,
+        track: Rgb,
+        knob: Rgb,
+        #[serde(default = "yes")]
+        show_track: bool,
+    },
     /// Shows `images[v]` for VP value v (status lights, battery, modes...).
     Icons { vp: Option<u16>, images: Vec<String> },
     /// Tap opens a list; picking item i writes i to VP and shows it in the box.
@@ -225,6 +234,10 @@ impl Widget {
     }
 }
 
+fn yes() -> bool {
+    true
+}
+
 pub fn button(text: &str, event: Event) -> WidgetKind {
     WidgetKind::Button {
         text: text.into(), size: 24.0, fg: [255; 3], bg: [37, 99, 235], pressed_bg: [29, 78, 216],
@@ -247,7 +260,7 @@ pub fn default_widgets() -> Vec<(&'static str, WidgetKind)> {
         ("Text Input", WidgetKind::Text { vp: None, len: 20, color: [255; 3], input: true, scroll: false }),
         ("Toggle", WidgetKind::Toggle { vp: None, on: [34, 197, 94], off: [71, 85, 105], knob: [255; 3], bit: None }),
         ("Lamp", WidgetKind::Lamp { vp: None, bit: None, on: [34, 197, 94], off: [51, 65, 85] }),
-        ("Slider", WidgetKind::Slider { vp: None, min: 0, max: 100, track: [71, 85, 105], knob: [255; 3] }),
+        ("Slider", WidgetKind::Slider { vp: None, min: 0, max: 100, track: [71, 85, 105], knob: [255; 3], show_track: true }),
         ("Icons", WidgetKind::Icons { vp: None, images: vec![] }),
         ("Dropdown", WidgetKind::Dropdown {
             vp: None, options: vec!["Option A".into(), "Option B".into(), "Option C".into()],
