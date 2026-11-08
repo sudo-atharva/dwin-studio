@@ -215,7 +215,7 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
         let out = std::env::temp_dir().join("dwin_import_test");
         for demo in ["Demo_2", "Demo_5"] {
-            let dir = root.join(format!("DWIN_Training_Demos-master/{demo}/HMI/DWIN_SET"));
+            let dir = root.join(format!("samples/DWIN_Training_Demos-master/{demo}/HMI/DWIN_SET"));
             if !dir.exists() {
                 continue; // samples not present on this machine
             }

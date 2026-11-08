@@ -7,9 +7,9 @@ use std::path::PathBuf;
 fn sample_dirs() -> Vec<PathBuf> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
     let mut dirs: Vec<PathBuf> = (1..=5)
-        .map(|n| root.join(format!("DWIN_Training_Demos-master/Demo_{n}/HMI/DWIN_SET")))
+        .map(|n| root.join(format!("samples/DWIN_Training_Demos-master/Demo_{n}/HMI/DWIN_SET")))
         .collect();
-    dirs.push(root.join("DWIN2_Display-main/DWIN_Display_Interface/DWIN_SET"));
+    dirs.push(root.join("samples/DWIN2_Display-main/DWIN_Display_Interface/DWIN_SET"));
     dirs.retain(|d| d.is_dir());
     if dirs.is_empty() {
         eprintln!("no DGUS sample folders next to the project: skipping (see README, Tests)");
