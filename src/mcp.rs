@@ -174,6 +174,9 @@ impl Server {
 
     fn save(&self) -> Result<String, String> {
         let Some(p) = &self.path else { return Ok(" (not saved: call new_project or open_project first)".into()) };
+        if let Some(dir) = p.parent().filter(|d| !d.as_os_str().is_empty()) {
+            std::fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
+        }
         std::fs::write(p, serde_json::to_string_pretty(&self.project).unwrap()).map_err(|e| format!("save {}: {e}", p.display()))?;
         Ok(String::new())
     }
@@ -479,8 +482,8 @@ mod tests {
         assert_eq!(base64(b"Man"), "TWFu");
         assert_eq!(base64(b"Ma"), "TWE=");
         let dir = std::env::temp_dir().join("uwin_mcp_test");
-        let _ = std::fs::create_dir_all(&dir);
-        let path = dir.join("t.uwin");
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("new_folder").join("t.uwin"); // folder doesn't exist yet
         let r = rpc(&[
             json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}}),
             json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
@@ -511,7 +514,7 @@ mod tests {
         assert!(txt(8).contains("screen 1 'settings'"), "{}", txt(8));
         assert!(txt(9).contains("5A A5 06 83"), "{}", txt(9));
         assert!(txt(10).contains("no warnings"), "{}", txt(10));
-        assert!(dir.join("build/DWIN_SET/13TouchFile.bin").exists());
+        assert!(dir.join("new_folder/build/DWIN_SET/13TouchFile.bin").exists());
         assert_eq!(r[11]["result"]["content"][1]["mimeType"], "image/png");
         let saved: Project = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert!(matches!(&saved.pages[1].widgets[0].kind, WidgetKind::Button { text, .. } if text == "GO"));
