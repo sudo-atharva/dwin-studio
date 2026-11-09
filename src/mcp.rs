@@ -71,6 +71,9 @@ pub fn serve(input: impl BufRead, mut output: impl Write) {
 }
 
 fn tool(name: &str, description: &str, props: Value, required: &[&str]) -> Value {
+    // Every description names the hardware, so a tool search for "DWIN", "DGUS", "HMI"
+    // or "touchscreen" finds these tools without the user naming UWIN Studio.
+    let description = format!("UWIN Studio - DWIN / DGUS II T5L HMI touchscreen display designer. {description}");
     json!({"name": name, "description": description,
            "inputSchema": {"type": "object", "properties": props, "required": required}})
 }

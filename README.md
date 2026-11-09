@@ -137,8 +137,11 @@ screenshots, runs the build and taps through them in the simulator.
 **Claude Code:**
 
 ```sh
-claude mcp add uwin-studio -- "C:/path/to/UWIN Studio.exe" mcp
+claude mcp add -s user uwin-studio -- "C:/path/to/UWIN Studio.exe" mcp
 ```
+
+`-s user` makes it available in every folder. Without it, Claude Code only sees the
+server when started in the folder where you ran the command.
 
 Any other MCP client works the same way: run `uwin-studio mcp` (JSON-RPC over stdio).
 
