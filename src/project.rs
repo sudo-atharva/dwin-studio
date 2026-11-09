@@ -105,6 +105,10 @@ pub enum WidgetKind {
         /// Touch area only: nothing drawn (the page picture shows the button).
         #[serde(default)]
         invisible: bool,
+        /// Pressed look = this page's picture (as in DGUS projects with a "pressed" page).
+        /// None = drawn by UWIN Studio.
+        #[serde(default)]
+        pressed_page: Option<usize>,
     },
     /// Number shown by the screen from a VP (int16, fixed-point by `dec_digits`).
     /// `input` = Some((min, max)): tapping opens a generated keypad.
@@ -321,7 +325,7 @@ fn yes() -> bool {
 pub fn button(text: &str, event: Event) -> WidgetKind {
     WidgetKind::Button {
         text: text.into(), size: 24.0, fg: [255; 3], bg: [37, 99, 235], pressed_bg: [29, 78, 216],
-        radius: 10.0, image: None, goto: None, event, invisible: false,
+        radius: 10.0, image: None, goto: None, event, invisible: false, pressed_page: None,
     }
 }
 
