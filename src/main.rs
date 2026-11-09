@@ -259,7 +259,7 @@ impl App {
 
     fn save(&mut self, ask: bool) -> bool {
         if ask || self.path.is_none() {
-            let dlg = rfd::FileDialog::new().add_filter("UWIN Studio project", &["dwin", "json"]).set_file_name("project.uwin");
+            let dlg = rfd::FileDialog::new().add_filter("UWIN Studio project", &["uwin", "dwin", "json"]).set_file_name("project.uwin");
             let Some(p) = dlg.save_file() else { return false };
             self.path = Some(p);
             self.refresh_assets();
@@ -281,7 +281,7 @@ impl App {
     /// DWIN_SET folder -> new project saved where the user says (pictures go to its assets/).
     fn import_dgus(&mut self) {
         let Some(dir) = rfd::FileDialog::new().set_title("DGUS DWIN_SET folder to import").pick_folder() else { return };
-        let dlg = rfd::FileDialog::new().set_title("Save the imported project as").add_filter("UWIN Studio project", &["dwin", "json"]);
+        let dlg = rfd::FileDialog::new().set_title("Save the imported project as").add_filter("UWIN Studio project", &["uwin", "dwin", "json"]);
         let Some(out) = dlg.set_file_name("imported.uwin").save_file() else { return };
         let folder = out.parent().unwrap_or(Path::new(".")).to_path_buf();
         match uwin_studio::import::import(&dir, &folder) {
@@ -548,7 +548,7 @@ impl App {
                 self.assets.clear();
             }
             if ui.button("📂 Open").clicked() {
-                if let Some(p) = rfd::FileDialog::new().add_filter("UWIN Studio project", &["dwin", "json"]).pick_file() {
+                if let Some(p) = rfd::FileDialog::new().add_filter("UWIN Studio project", &["uwin", "dwin", "json"]).pick_file() {
                     self.load(p);
                 }
             }
