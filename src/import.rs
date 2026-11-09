@@ -52,23 +52,31 @@ pub fn import(dir: &Path, project_dir: &Path) -> Result<(Project, Vec<String>), 
         Ok(format!("assets/{file}"))
     };
 
-    // Pages = ids that have a picture and are used (or below the highest used id).
+    // Keep DGUS page numbers: the MCU switches pages by number, so page N must stay page N.
+    // Ids without a usable picture become empty placeholders; pressed-look pictures stay as pages.
     let touch = set.touch.as_ref().map_or(&[][..], |t| &t.records[..]);
     let shows = set.show.as_ref().map(|s| &s.pages);
     let used: Vec<u16> = touch.iter().map(|r| r.page()).chain(shows.into_iter().flat_map(|s| s.keys().copied())).collect();
-    let last = used.iter().copied().max().unwrap_or(0) as usize;
+    let linked = touch.iter().flat_map(|r| [r.next_page, r.pressed_page]).filter(|&p| p != crate::touch::NONE);
+    let last = used.iter().copied().chain(linked).max().unwrap_or(0) as usize;
     let mut pages = vec![];
-    let mut index = BTreeMap::new(); // DGUS page id -> our page index
-    for (id, icon) in pics.icons.iter().enumerate().take(last + 1) {
-        let Some(icon) = icon else { continue };
-        // Skip other sizes and pictures that only serve as a button's pressed look.
+    let mut index = BTreeMap::new(); // DGUS page id -> our page index (always equal)
+    let mut placeholders = vec![];
+    for id in 0..=last {
+        let icon = pics.icons.get(id).and_then(Option::as_ref).filter(|i| (i.width, i.height) == (sw, sh));
         let pressed_only = touch.iter().any(|r| r.pressed_page as usize == id) && !used.contains(&(id as u16));
-        if (icon.width, icon.height) != (sw, sh) || pressed_only {
-            continue;
-        }
+        let (name, bg_image) = match icon {
+            Some(icon) => (if pressed_only { format!("page{id}_pressed") } else { format!("page{id}") }, Some(save(format!("page_{id:02}.jpg"), icon)?)),
+            None => {
+                placeholders.push(id.to_string());
+                (format!("unused{id}"), None)
+            }
+        };
         index.insert(id, pages.len());
-        let bg = save(format!("page_{id:02}.jpg"), icon)?;
-        pages.push(Page { name: format!("page{id}"), bg: [0; 3], bg_image: Some(bg), swipe: (None, None), widgets: vec![] });
+        pages.push(Page { name, bg: [0; 3], bg_image, swipe: (None, None), widgets: vec![] });
+    }
+    if !placeholders.is_empty() {
+        report.push(format!("page number(s) {} unused in the original: kept as empty pages so the others keep their numbers", placeholders.join(", ")));
     }
 
     for (pid, recs) in shows.into_iter().flatten() {
@@ -217,6 +225,33 @@ mod tests {
             // Rebuilding the import must not fail.
             crate::build::build(&p, &out).unwrap();
         }
+    }
+
+    /// A real machine's project (page numbers with gaps): after import + rebuild, every
+    /// original button is on the same page number and goes to the same page number,
+    /// so MCU firmware that switches pages by number keeps working.
+    #[test]
+    fn keeps_page_numbers() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../samples/AOC_DISPLAY_V2/DWIN_SET");
+        if !dir.exists() {
+            return; // sample not present on this machine
+        }
+        let out = std::env::temp_dir().join("uwin_import_aoc");
+        let (p, report) = super::import(&dir, &out).unwrap();
+        let orig = crate::set::DwinSet::load(&dir).unwrap().touch.unwrap().records;
+        let built = crate::build::build(&p, &out).unwrap().set.touch.unwrap().records;
+        let key = |r: &crate::touch::TouchRecord| (r.page(), r.x0, r.y0, r.x1, r.y1);
+        let mut checked = 0;
+        for o in orig.iter().filter(|o| o.code == 0 || o.code == 0xFE05) {
+            // Same page and corner; far edge may be clamped by 1 px to stay on the screen.
+            let near = |b: &&crate::touch::TouchRecord| key(b).0 == key(o).0 && (b.x0, b.y0) == (o.x0, o.y0) && b.x1.abs_diff(o.x1) <= 1 && b.y1.abs_diff(o.y1) <= 1;
+            let b = built.iter().find(near).unwrap_or_else(|| panic!("lost {:?}; {report:?}", key(o)));
+            if o.next_page != crate::touch::NONE {
+                assert_eq!(b.next_page, o.next_page, "button {:?} goes to the wrong page", key(o));
+            }
+            checked += 1;
+        }
+        assert!(checked > 50, "{checked}");
     }
     use std::path::Path;
 }
