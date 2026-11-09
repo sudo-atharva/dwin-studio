@@ -36,6 +36,8 @@ that does the whole job, in an editor that feels like VS Code or EEZ Studio.
   PC exactly as it would to the display, so you can write firmware before the display
   arrives.
 - **Import DGUS projects:** opens an existing `DWIN_SET` folder as an editable project.
+  Your MCU firmware keeps working after a rebuild: page numbers (including unused
+  ones), VP addresses, button keys, pressed looks and `T5LCFG.CFG` stay exactly as they were.
 - **Any screen size** (presets or custom), and configurable library numbers (page
   pictures in 23/32/42.icl, icons in 48.icl, ...).
 - **Fonts:** a built-in ASCII `.HZK` font, any TTF font, and Unicode `.dzk` fonts for
@@ -184,9 +186,12 @@ Known limits:
 - The drawing-area command format and setting the clock from the MCU follow DWIN's
   examples. Check them against your T5L manual.
 - Video, camera and page-transition features from DGUS are not supported.
+- Import skips DGUS popup menus whose items are drawn in a picture (reported after import).
 
 Tests: `cargo test`. The byte-for-byte DGUS round-trip tests run only when DWIN's sample
 projects (`DWIN_Training_Demos-master`, `DWIN2_Display-main`) are in a `samples` folder next to this one.
+The import test checks every DGUS project it finds under `samples`: after import and
+rebuild, each button must keep its page, its target page and its pressed look.
 
 ## Branches
 

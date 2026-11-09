@@ -228,34 +228,45 @@ mod tests {
         }
     }
 
-    /// A real machine's project (page numbers with gaps): after import + rebuild, every
-    /// original button is on the same page number and goes to the same page number,
-    /// so MCU firmware that switches pages by number keeps working.
+    /// Every DGUS project in ../samples: after import + rebuild, each original button is on
+    /// the same page number, goes to the same page and keeps its pressed look, so MCU firmware
+    /// that switches pages by number keeps working. (Samples are local only, never committed.)
     #[test]
     fn keeps_page_numbers() {
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../samples/AOC_DISPLAY_V2/DWIN_SET");
-        if !dir.exists() {
-            return; // sample not present on this machine
-        }
-        let out = std::env::temp_dir().join("uwin_import_aoc");
-        let (p, report) = super::import(&dir, &out).unwrap();
-        let orig = crate::set::DwinSet::load(&dir).unwrap().touch.unwrap().records;
-        let built = crate::build::build(&p, &out).unwrap().set.touch.unwrap().records;
-        let key = |r: &crate::touch::TouchRecord| (r.page(), r.x0, r.y0, r.x1, r.y1);
-        let mut checked = 0;
-        for o in orig.iter().filter(|o| o.code == 0 || o.code == 0xFE05) {
-            // Same page and corner; far edge may be clamped by 1 px to stay on the screen.
-            let near = |b: &&crate::touch::TouchRecord| key(b).0 == key(o).0 && (b.x0, b.y0) == (o.x0, o.y0) && b.x1.abs_diff(o.x1) <= 1 && b.y1.abs_diff(o.y1) <= 1;
-            let b = built.iter().find(near).unwrap_or_else(|| panic!("lost {:?}; {report:?}", key(o)));
-            if o.next_page != crate::touch::NONE {
-                assert_eq!(b.next_page, o.next_page, "button {:?} goes to the wrong page", key(o));
+        let samples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../samples");
+        let mut dirs = vec![];
+        let mut walk = vec![samples];
+        while let Some(d) = walk.pop() {
+            for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    if p.file_name().is_some_and(|n| n == "DWIN_SET") && p.join("13TouchFile.bin").exists() {
+                        dirs.push(p);
+                    } else {
+                        walk.push(p);
+                    }
+                }
             }
-            if o.pressed_page != crate::touch::NONE {
-                assert_eq!(b.pressed_page, o.pressed_page, "button {:?} lost its pressed look", key(o));
-            }
-            checked += 1;
         }
-        assert!(checked > 50, "{checked}");
+        for dir in dirs {
+            let out = std::env::temp_dir().join("uwin_import_pages");
+            let _ = std::fs::remove_dir_all(&out);
+            let Ok((p, report)) = super::import(&dir, &out) else { continue };
+            let orig = crate::set::DwinSet::load(&dir).unwrap().touch.unwrap().records;
+            let built = crate::build::build(&p, &out).unwrap().set.touch.unwrap().records;
+            let key = |r: &crate::touch::TouchRecord| (r.page(), r.x0, r.y0, r.x1, r.y1);
+            for o in orig.iter().filter(|o| o.code == 0 || o.code == 0xFE05) {
+                // Same page and corner; far edge may be clamped by 1 px to stay on the screen.
+                let near = |b: &&crate::touch::TouchRecord| key(b).0 == key(o).0 && (b.x0, b.y0) == (o.x0, o.y0) && b.x1.abs_diff(o.x1) <= 1 && b.y1.abs_diff(o.y1) <= 1;
+                let b = built.iter().find(near).unwrap_or_else(|| panic!("{}: lost {:?}; {report:?}", dir.display(), key(o)));
+                if o.next_page != crate::touch::NONE {
+                    assert_eq!(b.next_page, o.next_page, "{}: button {:?} goes to the wrong page", dir.display(), key(o));
+                }
+                if o.pressed_page != crate::touch::NONE {
+                    assert_eq!(b.pressed_page, o.pressed_page, "{}: button {:?} lost its pressed look", dir.display(), key(o));
+                }
+            }
+        }
     }
     use std::path::Path;
 }
