@@ -347,8 +347,8 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                     }
                     touch.push(rec);
                 }
-                WidgetKind::Button { goto, event, .. } => {
-                    rec.pressed_page = (total + pi) as u16;
+                WidgetKind::Button { goto, event, pressed_page, .. } => {
+                    rec.pressed_page = pressed_page.filter(|p| *p < npages).map_or(total + pi, |p| p) as u16;
                     match goto {
                         Some(t) if *t < npages => rec.next_page = *t as u16,
                         Some(t) => warnings.push(format!("'{}': page {t} does not exist", w.name)),

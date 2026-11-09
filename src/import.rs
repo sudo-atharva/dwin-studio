@@ -24,10 +24,10 @@ fn widget(kind: WidgetKind, name: String, x: u32, y: u32, w: u32, h: u32, commen
     wd
 }
 
-fn hotspot(event: Event, goto: Option<usize>) -> WidgetKind {
+fn hotspot(event: Event, goto: Option<usize>, pressed_page: Option<usize>) -> WidgetKind {
     WidgetKind::Button {
         text: String::new(), size: 20.0, fg: [255; 3], bg: [0; 3], pressed_bg: [0; 3], radius: 0.0,
-        image: None, goto, event, invisible: true,
+        image: None, goto, event, invisible: true, pressed_page,
     }
 }
 
@@ -151,6 +151,7 @@ pub fn import(dir: &Path, project_dir: &Path) -> Result<(Project, Vec<String>), 
         let Some(&pi) = index.get(&(r.page() as usize)) else { continue };
         let (x, y, w, h) = (r.x0 as u32, r.y0 as u32, (r.x1 as u32).saturating_sub(r.x0 as u32), (r.y1 as u32).saturating_sub(r.y0 as u32));
         let goto = index.get(&(r.next_page as usize)).copied().filter(|_| r.next_page != crate::touch::NONE);
+        let pressed = index.get(&(r.pressed_page as usize)).copied().filter(|_| r.pressed_page != crate::touch::NONE);
         let p = r.params().unwrap_or_default();
         let vp = num(&p, "vp") as u16;
         let kind_name = r.kind().map_or("basic", |k| k.name);
@@ -169,11 +170,11 @@ pub fn import(dir: &Path, project_dir: &Path) -> Result<(Project, Vec<String>), 
                 }
             }
             ("basic", _) if goto.is_some() || r.code == 0 => {
-                page.widgets.push(widget(hotspot(Event::None, goto), format!("go{}_{}", pi, page.widgets.len()), x, y, w, h, String::new()));
+                page.widgets.push(widget(hotspot(Event::None, goto, pressed), format!("go{}_{}", pi, page.widgets.len()), x, y, w, h, String::new()));
             }
             ("return_key", _) => {
                 let ev = Event::Key { vp: Some(vp), key: num(&p, "key") as u16 };
-                page.widgets.push(widget(hotspot(ev, goto), format!("key_{vp:04x}_{}", num(&p, "key")), x, y, w, h, String::new()));
+                page.widgets.push(widget(hotspot(ev, goto, pressed), format!("key_{vp:04x}_{}", num(&p, "key")), x, y, w, h, String::new()));
             }
             ("increment", f) => {
                 let target = f.map(|f| f.name.clone()).unwrap_or_else(|| format!("vp_{vp:04x}"));
@@ -182,7 +183,7 @@ pub fn import(dir: &Path, project_dir: &Path) -> Result<(Project, Vec<String>), 
                     target, step: if num(&p, "adj_mode") == 0 { -step } else { step }, min: num(&p, "min") as u16,
                     max: num(&p, "max") as u16, wrap: num(&p, "return_mode") != 0, repeat: num(&p, "key_mode") != 0,
                 };
-                page.widgets.push(widget(hotspot(ev, goto), format!("adj_{vp:04x}_{}", page.widgets.len()), x, y, w, h, String::new()));
+                page.widgets.push(widget(hotspot(ev, goto, pressed), format!("adj_{vp:04x}_{}", page.widgets.len()), x, y, w, h, String::new()));
             }
             (other, _) => report.push(format!("page {}: touch '{other}' at ({x},{y}) not imported", r.page())),
         }
@@ -248,6 +249,9 @@ mod tests {
             let b = built.iter().find(near).unwrap_or_else(|| panic!("lost {:?}; {report:?}", key(o)));
             if o.next_page != crate::touch::NONE {
                 assert_eq!(b.next_page, o.next_page, "button {:?} goes to the wrong page", key(o));
+            }
+            if o.pressed_page != crate::touch::NONE {
+                assert_eq!(b.pressed_page, o.pressed_page, "button {:?} lost its pressed look", key(o));
             }
             checked += 1;
         }
