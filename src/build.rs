@@ -421,7 +421,10 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                         ("sp", n(a.unwrap().sp.unwrap() as u32)), ("vp", vp()), ("x", n(x0)), ("y", n(y0)),
                         ("color", n(rgb565(*color))), ("box_x0", n(x0)), ("box_y0", n(y0)), ("box_x1", n(x1)),
                         ("box_y1", n(y1)), ("length", n(*len as u32)), ("font_w", n(size)), ("font_h", n(size)),
-                        ("encode", n(0x80)), // ASCII, auto character spacing
+                        // 0x82 = GBK + auto spacing, as DGUS writes it: characters < 0x80 come from the
+                        // ASCII font in library 0 (0_DWIN_ASC.HZK). 0x80 (8-bit) expects another font
+                        // layout and shows dotted garbage on real screens.
+                        ("encode", n(0x82)),
                     ];
                     let mut params = params;
                     if *unicode {
@@ -429,13 +432,13 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                         let next = p.unicode_lib as u32 + unicode_fonts.len() as u32;
                         let lib = unicode_fonts.entry(size as usize).or_insert(next);
                         params.retain(|(name, _)| *name != "encode");
-                        params.extend([("encode", n(0x85)), ("font0", n(*lib)), ("font1", n(*lib))]);
+                        params.extend([("encode", n(0x85)), ("font0", n(0)), ("font1", n(*lib))]); // as DGUS: ASCII lib 0
                     }
                     if *scroll {
                         let params: Params = vec![
                             ("sp", n(a.unwrap().sp.unwrap() as u32)), ("vp", vp()), ("step", n(1)), ("color", n(rgb565(*color))),
                             ("x0", n(x0)), ("y0", n(y0)), ("x1", n(x1)), ("y1", n(y1)), ("font_w", n(size)), ("font_h", n(size)),
-                            ("speed", n(2)),
+                            ("speed", n(2)), ("encode", n(0x02)), // GBK: ASCII from library 0, like text
                         ];
                         shows.push(show_record(kind(SHOW_KINDS, "scroll_text"), &params));
                     } else {
@@ -561,7 +564,7 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                                     ("sp", n(0xFFFF)), ("vp", n(WidgetKind::row_vp(a.unwrap().vp, *mcu_len, i as usize) as u32)),
                                     ("x", n(x0 + 12)), ("y", n(ty)), ("color", n(rgb565(*fg))), ("box_x0", n(x0 + 12)), ("box_y0", n(ty)),
                                     ("box_x1", n(x1)), ("box_y1", n((ry + rh as u32).min(y1))), ("length", n(*mcu_len as u32)),
-                                    ("font_w", n(s)), ("font_h", n(s)), ("encode", n(0x80)),
+                                    ("font_w", n(s)), ("font_h", n(s)), ("encode", n(0x82)),
                                 ];
                                 shows.push(show_record(kind(SHOW_KINDS, "text"), &params));
                             }
@@ -1095,6 +1098,8 @@ mod tests {
         let list_vp = out4.allocs.iter().find(|a| a.name == "jobs").unwrap().vp;
         assert_eq!(shows.len(), 2 + 4, "button icon, list icon, 4 row texts");
         assert!(shows[3].contains(&("vp", Value::Num(list_vp as u32 + 0x10 + 10))), "{:?}", shows[3]);
+        // Text encoding as DGUS writes it (0x82: ASCII from library 0). 0x80 garbles on real screens.
+        assert!(shows[3].contains(&("encode", Value::Num(0x82))), "{:?}", shows[3]);
         // Unicode text: own .dzk of its size from library 24, records point at it.
         let mut p2 = sample();
         p2.pages[1].widgets.push(Widget::new(palette("Unicode Text"), "greet", 10, 300));
@@ -1106,6 +1111,7 @@ mod tests {
         let rec = out2.set.show.as_ref().unwrap().pages[&1].iter().find(|r| crate::control::show_kind(r).unwrap().name == "text").unwrap();
         let tp = crate::control::show_params(rec).unwrap();
         assert!(tp.contains(&("encode", Value::Num(0x85))) && tp.contains(&("font1", Value::Num(24))));
+        assert!(tp.contains(&("font0", Value::Num(0))), "ASCII part from library 0, like DGUS");
         // The 3 MB ASCII font fills slots 0..11, so pages at 5 would be overwritten.
         p.page_lib = 5;
         let out = build(&p, Path::new(".")).unwrap();

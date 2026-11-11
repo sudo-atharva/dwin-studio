@@ -15,6 +15,25 @@
 //       SoftwareSerial dwinSerial(10, 11);  // RX, TX
 //       #define DWIN dwinSerial
 
+// Print every frame to the USB Serial Monitor (115200): "->" to the screen, "<-" from it.
+// Set to 0 once everything works (printing slows the loop a little).
+#define DEBUG_FRAMES 1
+
+void printFrame(const char *dir, uint16_t vp, const uint8_t *data, uint8_t n) {
+#if DEBUG_FRAMES
+  Serial.print(dir);
+  Serial.print(" VP 0x");
+  Serial.print(vp, HEX);
+  Serial.print(":");
+  for (uint8_t i = 0; i < n && i < 24; i++) {
+    Serial.print(' ');
+    if (data[i] < 0x10) Serial.print('0');
+    Serial.print(data[i], HEX);
+  }
+  Serial.println(n > 24 ? " ..." : "");
+#endif
+}
+
 // ---------------------------------------------------------------- sending
 
 // 5A A5 <len> 82 <VP hi> <VP lo> <data...>
@@ -26,6 +45,8 @@ void writeBytes(uint16_t vp, const uint8_t *data, uint8_t n) {
   DWIN.write(vp >> 8);
   DWIN.write(vp & 0xFF);
   DWIN.write(data, n);
+  // Live values sent 10x a second would flood the monitor; log everything else.
+  if (vp != 0x0310 && vp != VP_PRESSURE && vp != VP_VOLTS && vp != VP_BATTERY) printFrame("->", vp, data, n);
 }
 
 void writeVP(uint16_t vp, uint16_t value) {
@@ -188,7 +209,10 @@ void readDwin() {
     buf[pos++] = b;
     if (pos > 2 && pos == len + 3) {
       pos = 0;
-      if (buf[3] == 0x83) onTouch((buf[4] << 8) | buf[5], buf + 7, len - 4);
+      if (buf[3] == 0x83) {
+        printFrame("<-", (buf[4] << 8) | buf[5], buf + 7, len - 4);
+        onTouch((buf[4] << 8) | buf[5], buf + 7, len - 4);
+      }
       // buf[3] == 0x82 is the "OK" reply to our writes: nothing to do.
     }
   }
@@ -210,7 +234,7 @@ void setup() {
 #else
   DWIN.begin(115200);
 #endif
-  delay(600);  // let the screen boot
+  delay(2000);  // let the screen boot first, or the first frames (clock, texts) are lost
 
   setPage(PAGE_BUTTONS);
   // Clock = when this sketch was compiled ("Nov  8 2026", "11:51:00").
