@@ -868,7 +868,7 @@ fn describe(p: &Project, w: &Widget, a: Option<&Alloc>) -> Option<String> {
         }
         WidgetKind::List { items, mcu_len, .. } if *mcu_len > 0 => {
             let rows: Vec<_> = (0..items.len()).map(|i| format!("row {} text at {:#06x}", i + 1, WidgetKind::row_vp(vp(), *mcu_len, i))).collect();
-            format!("LIST    VP {:#06x}: 0 = none, n = row n picked (sent on tap); MCU writes {mcu_len} bytes ASCII per row: {}", vp(), rows.join(", "))
+            format!("LIST    VP {:#06x}: 0 = none, n = row n picked (sent on tap); MCU writes {mcu_len} bytes ASCII per row: {}; after VP changes, write the rows again (the highlight is drawn over them)", vp(), rows.join(", "))
         }
         WidgetKind::List { items, .. } => {
             let list: Vec<_> = items.iter().enumerate().map(|(i, o)| format!("{}={o}", i + 1)).collect();

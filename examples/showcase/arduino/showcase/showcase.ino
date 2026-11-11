@@ -187,6 +187,8 @@ void onTouch(uint16_t vp, const uint8_t *data, uint8_t bytes) {
       break;
     case VP_FILES:
       pickedFile = v;
+      // The screen draws the highlight over the rows: write them again so they show on top.
+      for (uint8_t i = 0; i < 4; i++) writeText(fileRow(i), files[i]);
       break;
     case VP_LOAD:
       snprintf(line, sizeof(line), pickedFile ? "Loading %s" : "Pick a file first", pickedFile ? files[pickedFile - 1] : "");
