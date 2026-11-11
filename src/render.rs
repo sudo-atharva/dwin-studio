@@ -218,15 +218,18 @@ pub fn draw_state(px: &mut Pixmap, w: &Widget, state: usize, base: &Path) {
             let d = w.h as f32;
             rounded(px, (w.x as f32, w.y as f32, d, d), d / 2.0, *knob);
         }
-        WidgetKind::List { items, size, fg, bg, sel, .. } => {
-            // state = selected row + 1 (0 = none).
+        WidgetKind::List { items, size, fg, bg, sel, mcu_len, .. } => {
+            // state = selected row + 1 (0 = none). Rows the MCU writes are separate text
+            // controls on the screen, so their highlight is a bar left of the text that never
+            // covers it (the screen doesn't redraw unchanged text over a new icon).
             let (x, y, ww, hh) = frect(w);
             let rh = hh / items.len().max(1) as f32;
             rounded(px, (x, y, ww, hh), 0.0, *bg);
+            let band = if *mcu_len > 0 { MCU_LIST_BAR as f32 } else { ww };
             for (i, it) in items.iter().enumerate() {
                 let ry = y + i as f32 * rh;
                 if state == i + 1 {
-                    rounded(px, (x, ry, ww, rh), 0.0, *sel);
+                    rounded(px, (x, ry, band, rh), 0.0, *sel);
                 }
                 text(px, it, x + 12.0, ry + (rh - size) / 2.0, *size, *fg);
             }
@@ -396,6 +399,9 @@ pub fn render(page: &Page, width: u16, height: u16, mode: Mode, base: &Path) -> 
 }
 
 /// Cut `w`'s area out of a Base render and draw the widget in `state` on it: one DWIN icon.
+/// Width of the selection bar of a list filled by the MCU (its texts start right of it).
+pub const MCU_LIST_BAR: i32 = 8;
+
 pub fn icon(base_px: &Pixmap, w: &Widget, state: usize, size: (i32, i32), base: &Path) -> Pixmap {
     let (iw, ih) = (size.0.max(1) as u32, size.1.max(1) as u32);
     let mut px = Pixmap::new(iw, ih).unwrap();

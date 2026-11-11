@@ -487,7 +487,9 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                         }
                     }
                     for s in 0..states {
-                        icons.add(&icon(&base_px, &face, s as usize, (w.w, w.h), base))?;
+                        // MCU-filled list: the icon is only the selection bar, left of the row texts.
+                        let iw = if matches!(w.kind, WidgetKind::List { mcu_len: 1.., .. }) { crate::render::MCU_LIST_BAR } else { w.w };
+                        icons.add(&icon(&base_px, &face, s as usize, (iw, w.h), base))?;
                     }
                     let last = first + states - 1;
                     if let WidgetKind::Animation { period_ms, autoplay, .. } = &w.kind {
@@ -1107,6 +1109,15 @@ mod tests {
         assert!(shows[3].contains(&("vp", Value::Num(list_vp as u32 + 0x10 + 10))), "{:?}", shows[3]);
         // Text encoding as DGUS writes it (0x82: ASCII from library 0). 0x80 garbles on real screens.
         assert!(shows[3].contains(&("encode", Value::Num(0x82))), "{:?}", shows[3]);
+        // MCU list highlight is a bar left of the row texts, so it never hides them.
+        let icon_at = |r: &Params, k: &str| r.iter().find(|(n, _)| *n == k).map(|(_, v)| v.clone());
+        let Some(Value::Num(first)) = icon_at(&shows[1], "icon_min") else { panic!("{:?}", shows[1]) };
+        let lib = out4.set.icls.values().find(|l| l.icons.len() > first as usize).unwrap();
+        let bar = lib.icons[first as usize].as_ref().unwrap();
+        assert_eq!(bar.width as i32, crate::render::MCU_LIST_BAR);
+        let Some(Value::Num(text_x)) = icon_at(&shows[3], "x") else { panic!() };
+        let Some(Value::Num(list_x)) = icon_at(&shows[1], "x") else { panic!() };
+        assert!(text_x >= list_x + bar.width as u32, "row text starts right of the bar");
         // State icons replace the previous state (no ghosts on real screens).
         assert!(shows[1].contains(&("mode", Value::Num(1))), "{:?}", shows[1]);
         // Unicode text: own .dzk of its size from library 24, records point at it.
