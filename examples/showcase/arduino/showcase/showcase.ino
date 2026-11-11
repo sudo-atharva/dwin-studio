@@ -130,6 +130,16 @@ uint16_t fileRow(uint8_t i) { return VP_FILES + 0x10 + i * 10; }
 
 // What the screen last sent for the MCU list (1..4, 0 = none).
 uint16_t pickedFile = 0;
+// The screen draws the list highlight over the row texts, so after a pick the rows are written
+// again (blank first: the screen skips redrawing a text whose content did not change).
+uint32_t redrawRowsAt = 0;
+
+void redrawRows() {
+  for (uint8_t i = 0; i < 4; i++) {
+    writeText(fileRow(i), "");
+    writeText(fileRow(i), files[i]);
+  }
+}
 char line[48];
 
 void status(const char *s) { writeText(VP_STATUS, s); }
@@ -187,8 +197,7 @@ void onTouch(uint16_t vp, const uint8_t *data, uint8_t bytes) {
       break;
     case VP_FILES:
       pickedFile = v;
-      // The screen draws the highlight over the rows: write them again so they show on top.
-      for (uint8_t i = 0; i < 4; i++) writeText(fileRow(i), files[i]);
+      redrawRowsAt = millis() + 150;  // after the screen has drawn the new highlight
       break;
     case VP_LOAD:
       snprintf(line, sizeof(line), pickedFile ? "Loading %s" : "Pick a file first", pickedFile ? files[pickedFile - 1] : "");
@@ -263,6 +272,10 @@ void setup() {
 
 void loop() {
   readDwin();
+  if (redrawRowsAt && (int32_t)(millis() - redrawRowsAt) >= 0) {
+    redrawRowsAt = 0;
+    redrawRows();
+  }
 
   static uint32_t fast = 0, slow = 0;
   static uint16_t tick = 0;
