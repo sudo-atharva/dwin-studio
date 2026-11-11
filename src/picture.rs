@@ -65,10 +65,17 @@ pub fn pack_jpeg(j: &[u8], width: u16, height: u16) -> Result<Icon, FormatError>
     let mut h = vec![0xFF, 0xD8];
     let app0 = segs.iter().find(|(m, p)| *m == 0xE0 && p.len() == 14).map_or(&APP0[..], |(_, p)| p);
     put_seg(&mut h, 0xE0, app0);
+    // DWIN's hardware decoder expects component ids 1, 2, 3 (JFIF, as DGUS writes them).
+    // Encoders that number them 0, 1, 2 give garbled colors on the screen (not on a PC).
+    let shift = segs.iter().find(|(m, _)| *m == 0xC0).is_some_and(|(_, p)| p.len() > 6 && p[6] == 0) as u8;
     for m in [0xDB, 0xC0, 0xC4] {
         for (_, p) in segs.iter().filter(|(sm, _)| *sm == m) {
             if m == 0xC0 {
-                put_seg(&mut h, m, p);
+                let mut p = p.clone();
+                for c in 0..p[5] as usize {
+                    p[6 + 3 * c] += shift;
+                }
+                put_seg(&mut h, m, &p);
             } else {
                 for t in split_tables(m, p) {
                     put_seg(&mut h, m, &t);
@@ -83,6 +90,9 @@ pub fn pack_jpeg(j: &[u8], width: u16, height: u16) -> Result<Icon, FormatError>
     // Entry = 10-byte icon header + JPEG header; scan data must start 4-aligned.
     let pad = (4 - (10 + h.len() + 4 + sos.len()) % 4) % 4;
     let mut sos = sos.clone();
+    for c in 0..sos[0] as usize {
+        sos[1 + 2 * c] += shift;
+    }
     sos.resize(sos.len() + pad, 0);
     put_seg(&mut h, 0xDA, &sos);
 
@@ -162,6 +172,11 @@ mod tests {
         assert_eq!(icon.scan_off, 626, "same header size as DGUS");
         assert_eq!((10 + icon.scan_off as usize) % 4, 0);
         assert_eq!(icon.scan_len % 4, 0);
+        // Byte-level details the screen's hardware decoder needs (PC decoders don't care).
+        let sof = &segs.iter().find(|(m, _)| *m == 0xC0).unwrap().1;
+        assert_eq!([sof[6], sof[9], sof[12]], [1, 2, 3], "component ids must be 1,2,3 like DGUS");
+        let sos = &segs.iter().find(|(m, _)| *m == 0xDA).unwrap().1;
+        assert_eq!([sos[1], sos[3], sos[5]], [1, 2, 3]);
 
         // Through a full ICL file and back.
         let icl = Icl { icons: vec![Some(icon)], align: 4, pad_to: 0 };
