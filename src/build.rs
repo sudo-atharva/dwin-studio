@@ -24,6 +24,12 @@ pub const SP_START: u16 = 0x9000;
 /// Each library number N sits at flash offset N x 256 KB.
 const SECTOR: usize = 256 * 1024;
 /// Bit icons need a private work VP each; they live here, below the SP area.
+/// Icon "display mode" 1 = "background display" (DGUS wording): the whole icon replaces what
+/// was there. 0 = "transparence": dark pixels are see-through and the previous state is not
+/// cleared, which leaves ghosts on real screens (animations, toggles, list highlights).
+/// Needles and slider knobs stay 0: they are meant to sit on top of a dial or track.
+const OPAQUE: u32 = 1;
+
 const AUX_START: u16 = 0x8000;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -337,7 +343,7 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                     }
                     let params: Params = vec![
                         ("sp", n(0xFFFF)), ("vp", vp()), ("x", n(x0)), ("y", n(y0)), ("v_min", n(0)), ("v_max", n(1)),
-                        ("icon_min", n(first)), ("icon_max", n(first + 1)), ("lib", n(ilib)),
+                        ("icon_min", n(first)), ("icon_max", n(first + 1)), ("lib", n(ilib)), ("mode", n(OPAQUE)),
                     ];
                     shows.push(show_record(kind(SHOW_KINDS, "var_icon"), &params));
                     let params: Params = vec![("vp", vp()), ("adj_mode", n(1)), ("return_mode", n(1)), ("step", n(1)), ("min", n(0)), ("max", n(1))];
@@ -489,7 +495,7 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                         let params: Params = vec![
                             ("sp", n(0xFFFF)), ("vp", vp()), ("x", n(x0)), ("y", n(y0)), ("v_stop", n(0)), ("v_start", n(1)),
                             ("icon_stop", n(first)), ("icon_start", n(first)), ("icon_end", n(last)),
-                            ("lib", n(ilib)), ("period", n((*period_ms / 8).clamp(1, 255) as u32)),
+                            ("lib", n(ilib)), ("period", n((*period_ms / 8).clamp(1, 255) as u32)), ("mode", n(OPAQUE)),
                         ];
                         shows.push(show_record(kind(SHOW_KINDS, "animation"), &params));
                         if *autoplay {
@@ -508,6 +514,7 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                             ("sp", n(0xFFFF)), ("vp", vp()), ("vp_aux", n(aux as u32)), ("bits", n(1 << (b % 16))),
                             ("lib", n(ilib)), ("icon0_start", n(first)), ("icon0_end", n(first)),
                             ("icon1_start", n(last)), ("icon1_end", n(last)), ("x", n(x0)), ("y", n(y0)),
+                            ("icon_mode", n(OPAQUE)),
                         ];
                         aux += 2;
                         shows.push(show_record(kind(SHOW_KINDS, "bit_icon"), &params));
@@ -521,7 +528,7 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                     let params: Params = vec![
                         ("sp", n(0xFFFF)), ("vp", vp()), ("x", n(x0)), ("y", n(y0)),
                         ("v_min", n(0)), ("v_max", n(states - 1)), ("icon_min", n(first)),
-                        ("icon_max", n(last)), ("lib", n(ilib)),
+                        ("icon_max", n(last)), ("lib", n(ilib)), ("mode", n(OPAQUE)),
                     ];
                     shows.push(show_record(kind(SHOW_KINDS, "var_icon"), &params));
                     match &w.kind {
@@ -1100,6 +1107,8 @@ mod tests {
         assert!(shows[3].contains(&("vp", Value::Num(list_vp as u32 + 0x10 + 10))), "{:?}", shows[3]);
         // Text encoding as DGUS writes it (0x82: ASCII from library 0). 0x80 garbles on real screens.
         assert!(shows[3].contains(&("encode", Value::Num(0x82))), "{:?}", shows[3]);
+        // State icons replace the previous state (no ghosts on real screens).
+        assert!(shows[1].contains(&("mode", Value::Num(1))), "{:?}", shows[1]);
         // Unicode text: own .dzk of its size from library 24, records point at it.
         let mut p2 = sample();
         p2.pages[1].widgets.push(Widget::new(palette("Unicode Text"), "greet", 10, 300));
