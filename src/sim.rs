@@ -4,7 +4,7 @@
 //! `4F 4B`), `83` read (answered), page switch through VP 0x0084, curves through 0x0310.
 //! ponytail: no CRC mode; add when a project enables CRC in T5LCFG.
 
-use crate::build::{allocate, keyboard, keyboard_pos, keypad, keypad_pos, menu, Alloc, Area, Extra};
+use crate::build::{allocate, keyboard, keyboard_pos, keypad, keypad_field, keypad_pos, menu, Alloc, Area, Extra};
 use crate::project::{Event, Project, Widget, WidgetKind};
 use crate::render::{self, draw_state, frect, gauge_geom, line, needle_len_width, polar, rounded, text, Mode};
 use std::path::Path;
@@ -482,7 +482,7 @@ impl Sim {
                     WidgetKind::Number { color, .. } | WidgetKind::Text { color, .. } => *color,
                     _ => [255; 3],
                 };
-                if !matches!(pp.prompt, Prompt::Menu { .. }) {
+                if matches!(pp.prompt, Prompt::Text { .. }) {
                     rounded(&mut px, frect(w), 6.0, [51, 65, 85]);
                     let shown = match (&pp.prompt, pp.typed.is_empty()) {
                         (Prompt::Clock, true) => "YYMMDDhhmm or hhmm".to_string(),
@@ -504,6 +504,16 @@ impl Sim {
                     let (s, d) = (4 * (sy * pw + sx) as usize, 4 * (dy * pw + dx) as usize);
                     px.data_mut()[d..d + 4].copy_from_slice(&kb.data()[s..s + 4]);
                 }
+            }
+            // Numbers and the clock echo in the keypad's entry box, as the screen does.
+            if matches!(pp.prompt, Prompt::Number { .. } | Prompt::Clock) {
+                let (fx, fy, _, fh) = keypad_field(pp.area);
+                let shown = match (&pp.prompt, pp.typed.is_empty()) {
+                    (Prompt::Clock, true) => "YYMMDDhhmm".to_string(),
+                    _ => format!("{}_", pp.typed),
+                };
+                let size = fh as f32 * 0.75;
+                text(&mut px, &shown, (pp.pos.0 + fx + 12) as f32, (pp.pos.1 + fy) as f32 + (fh as f32 - size) / 2.0, size, [255; 3]);
             }
         }
         px

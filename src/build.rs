@@ -193,7 +193,8 @@ fn key_page(name: &str, area: Area, cols: f32, rows: f32, g: i32, keys: &[Key]) 
     let (x0, y0, w, h) = area;
     let kw = (w - g) as f32 / cols - g as f32;
     let kh = (h - g) as f32 / rows - g as f32;
-    let mut panel = Widget::new(WidgetKind::Panel { color: [30, 41, 59], radius: 12.0 }, "kb", x0, y0);
+    // Square corners: the screen copies the keypad as a rectangle, so rounded corners show black.
+    let mut panel = Widget::new(WidgetKind::Panel { color: [30, 41, 59], radius: 0.0 }, "kb", x0, y0);
     (panel.w, panel.h) = (w, h);
     let mut page = Page { name: name.into(), bg: [0; 3], bg_image: None, swipe: (None, None), widgets: vec![panel] };
     let mut codes = vec![None];
@@ -216,18 +217,41 @@ const CAPS: u16 = 0xF4;
 
 /// Numeric keypad, centred on its page. Returns the page and the keypad area on it.
 pub(crate) fn keypad(sw: i32, sh: i32) -> (Extra, Area) {
-    let g = 8;
-    let kh = ((sh * 2 / 3 - 5 * g) / 4).max(16);
-    let (w, h) = (4 * (kh * 6 / 5) + 5 * g, 4 * kh + 5 * g);
+    let g = KEYPAD_GAP;
+    let kh = ((sh * 2 / 3 - 6 * g) / 5).max(16);
+    let (w, h) = (4 * (kh * 6 / 5) + 5 * g, 5 * kh + 6 * g);
     let area = ((sw - w) / 2, (sh - h) / 2, w, h);
     let c = |ch: char| ch as u16;
     let keys: [Key; 15] = [
-        ("7", c('7'), 0., 0., 1., 1.), ("8", c('8'), 1., 0., 1., 1.), ("9", c('9'), 2., 0., 1., 1.), ("<-", BACK, 3., 0., 1., 1.),
-        ("4", c('4'), 0., 1., 1., 1.), ("5", c('5'), 1., 1., 1., 1.), ("6", c('6'), 2., 1., 1., 1.), ("Esc", ESC, 3., 1., 1., 1.),
-        ("1", c('1'), 0., 2., 1., 1.), ("2", c('2'), 1., 2., 1., 1.), ("3", c('3'), 2., 2., 1., 1.), ("OK", OK, 3., 2., 1., 2.),
-        ("-", c('-'), 0., 3., 1., 1.), ("0", c('0'), 1., 3., 1., 1.), (".", c('.'), 2., 3., 1., 1.),
+        ("7", c('7'), 0., 1., 1., 1.), ("8", c('8'), 1., 1., 1., 1.), ("9", c('9'), 2., 1., 1., 1.), ("<-", BACK, 3., 1., 1., 1.),
+        ("4", c('4'), 0., 2., 1., 1.), ("5", c('5'), 1., 2., 1., 1.), ("6", c('6'), 2., 2., 1., 1.), ("Esc", ESC, 3., 2., 1., 1.),
+        ("1", c('1'), 0., 3., 1., 1.), ("2", c('2'), 1., 3., 1., 1.), ("3", c('3'), 2., 3., 1., 1.), ("OK", OK, 3., 3., 1., 2.),
+        ("-", c('-'), 0., 4., 1., 1.), ("0", c('0'), 1., 4., 1., 1.), (".", c('.'), 2., 4., 1., 1.),
     ];
-    (key_page("_keypad", area, 4.0, 4.0, g, &keys), area)
+    // Row 0 is the entry box: the screen shows the typed value there, not over the old one.
+    let mut extra = key_page("_keypad", area, 4.0, 5.0, g, &keys);
+    let (fx, fy, fw, fh) = keypad_field(area);
+    let mut field = Widget::new(WidgetKind::Panel { color: [15, 23, 42], radius: 8.0 }, "entry", area.0 + fx, area.1 + fy);
+    (field.w, field.h) = (fw, fh);
+    extra.page.widgets.push(field);
+    extra.codes.push(None);
+    (extra, area)
+}
+
+const KEYPAD_GAP: i32 = 8;
+
+/// Entry box of the keypad, relative to the keypad's top-left corner: (x, y, w, h).
+pub(crate) fn keypad_field((_, _, w, h): Area) -> Area {
+    let g = KEYPAD_GAP;
+    (g, g, w - 2 * g, (h - 6 * g) / 5)
+}
+
+/// Where the screen echoes typed digits (inside the popped-up keypad's entry box), and the
+/// font size that fits there.
+pub(crate) fn keypad_echo(pos: (i32, i32), area: Area, font: u32) -> (u32, u32, u32) {
+    let (fx, fy, _, fh) = keypad_field(area);
+    let font = font.min((fh * 3 / 4) as u32).max(8);
+    ((pos.0 + fx + 12) as u32, (pos.1 + fy + (fh - font as i32) / 2) as u32, font)
 }
 
 /// QWERTY keyboard across the bottom of its page.
@@ -409,10 +433,11 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                     }
                     if let (Some((min, max)), Some((kp, (kx, ky, kw, kh)))) = (input, kpad) {
                         let (pos_x, pos_y) = keypad_pos(w, (kx, ky, kw, kh), sw);
+                        let (ex, ey, efont) = keypad_echo((pos_x, pos_y), (kx, ky, kw, kh), font);
                         let params: Params = vec![
                             ("vp", vp()), ("int_digits", n(*int_digits as u32)), ("dec_digits", n(*dec_digits as u32)),
-                            ("show_x", n(x0)), ("show_y", n(y0)), ("color", n(rgb565(*color))), ("font", n(font)),
-                            ("cursor_color", n(cursor(*color))), ("kb_source", n(1)), ("kb_page", n(kp as u32)),
+                            ("show_x", n(ex)), ("show_y", n(ey)), ("color", n(0xFFFF)), ("font", n(efont)),
+                            ("cursor_color", n(cursor([255; 3]))), ("kb_source", n(1)), ("kb_page", n(kp as u32)),
                             ("kb_x0", n(kx as u32)), ("kb_y0", n(ky as u32)), ("kb_x1", n((kx + kw - 1) as u32)),
                             ("kb_y1", n((ky + kh - 1) as u32)), ("kb_pos_x", n(pos_x as u32)), ("kb_pos_y", n(pos_y as u32)),
                             ("limits_en", n(1)), ("min", n(*min as u32)), ("max", n(*max as u32)),
@@ -636,9 +661,10 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
                     if let (true, Some((kp, area))) = (*settable, kpad) {
                         let (kx, ky, kw, kh) = area;
                         let (pos_x, pos_y) = keypad_pos(w, area, sw);
+                        let (ex, ey, efont) = keypad_echo((pos_x, pos_y), area, (w.h / 2).clamp(1, 255) as u32);
                         let params: Params = vec![
-                            ("show_x", n(x0)), ("show_y", n(y0)), ("color", n(rgb565(*color))), ("font", n((w.h / 2).clamp(1, 255) as u32)),
-                            ("cursor_color", n(cursor(*color))), ("kb_source", n(1)), ("kb_page", n(kp as u32)),
+                            ("show_x", n(ex)), ("show_y", n(ey)), ("color", n(0xFFFF)), ("font", n(efont)),
+                            ("cursor_color", n(cursor([255; 3]))), ("kb_source", n(1)), ("kb_page", n(kp as u32)),
                             ("kb_x0", n(kx as u32)), ("kb_y0", n(ky as u32)), ("kb_x1", n((kx + kw - 1) as u32)), ("kb_y1", n((ky + kh - 1) as u32)),
                             ("kb_pos_x", n(pos_x as u32)), ("kb_pos_y", n(pos_y as u32)),
                         ];
