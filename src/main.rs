@@ -152,6 +152,13 @@ fn graphics() -> eframe::egui_wgpu::WgpuConfiguration {
     use eframe::egui_wgpu::{wgpu, WgpuConfiguration, WgpuSetup, WgpuSetupCreateNew};
     let software_only = std::env::var_os("UWIN_SOFTWARE_RENDER").is_some();
     let mut setup = WgpuSetupCreateNew::without_display_handle();
+    // Windows: DirectX 12 (+ GL), never Vulkan. Just listing Vulkan cards crashes some Intel
+    // drivers (igvk64.dll 31.0.101.2115: access violation, the process dies before any error
+    // can be shown). DX12 covers every Windows 10/11 GPU and includes the WARP software renderer.
+    // WGPU_BACKEND still overrides this.
+    if cfg!(windows) && std::env::var_os("WGPU_BACKEND").is_none() {
+        setup.instance_descriptor.backends = wgpu::Backends::DX12 | wgpu::Backends::GL;
+    }
     setup.native_adapter_selector = Some(std::sync::Arc::new(move |adapters: &[wgpu::Adapter], surface: Option<&wgpu::Surface<'_>>| {
         let rank = |a: &wgpu::Adapter| match a.get_info().device_type {
             wgpu::DeviceType::DiscreteGpu => 0,
