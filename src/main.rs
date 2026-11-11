@@ -93,14 +93,19 @@ fn main() -> eframe::Result {
         return Ok(());
     }
     let path = args.get(1).map(PathBuf::from);
+    // A crash in a windowed exe is otherwise invisible: say what happened and keep a log.
+    std::panic::set_hook(Box::new(|info| fatal(&format!("UWIN Studio crashed:
+
+{info}"))));
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1480.0, 900.0])
             .with_maximized(true)
             .with_icon(eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon.png")).expect("icon")),
+        wgpu_options: graphics(),
         ..Default::default()
     };
-    eframe::run_native(
+    let run = eframe::run_native(
         "UWIN Studio",
         options,
         Box::new(|cc| {
@@ -108,7 +113,65 @@ fn main() -> eframe::Result {
             theme::apply(&cc.egui_ctx, &app.theme);
             Ok(Box::new(app))
         }),
-    )
+    );
+    if let Err(e) = &run {
+        // A GPU that is found but fails (broken or missing driver): try once more on the
+        // software renderer, in a fresh process (a window system can't be restarted in-process).
+        if std::env::var_os("UWIN_SOFTWARE_RENDER").is_none() {
+            let restarted = std::env::current_exe()
+                .and_then(|exe| std::process::Command::new(exe).args(&args[1..]).env("UWIN_SOFTWARE_RENDER", "1").spawn());
+            if restarted.is_ok() {
+                return Ok(());
+            }
+        }
+        fatal(&format!(
+            "UWIN Studio could not open its window:
+
+{e}
+
+Update the graphics driver, or start it with the              environment variable UWIN_SOFTWARE_RENDER=1 to draw without the graphics card."
+        ));
+    }
+    run
+}
+
+/// Show `msg` in a dialog and append it to uwin-studio-error.txt next to the exe.
+fn fatal(msg: &str) {
+    if let Some(log) = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("uwin-studio-error.txt"))) {
+        let _ = std::fs::OpenOptions::new().create(true).append(true).open(log).and_then(|mut f| writeln!(f, "{msg}
+"));
+    }
+    eprintln!("{msg}");
+    rfd::MessageDialog::new().set_level(rfd::MessageLevel::Error).set_title("UWIN Studio").set_description(msg).show();
+}
+
+/// Pick a graphics card that can draw to the window; without one (PCs with no GPU driver,
+/// remote desktops, VMs) fall back to Windows' built-in software renderer (WARP).
+/// UWIN_SOFTWARE_RENDER=1 forces the software renderer.
+fn graphics() -> eframe::egui_wgpu::WgpuConfiguration {
+    use eframe::egui_wgpu::{wgpu, WgpuConfiguration, WgpuSetup, WgpuSetupCreateNew};
+    let software_only = std::env::var_os("UWIN_SOFTWARE_RENDER").is_some();
+    let mut setup = WgpuSetupCreateNew::without_display_handle();
+    setup.native_adapter_selector = Some(std::sync::Arc::new(move |adapters: &[wgpu::Adapter], surface: Option<&wgpu::Surface<'_>>| {
+        let rank = |a: &wgpu::Adapter| match a.get_info().device_type {
+            wgpu::DeviceType::DiscreteGpu => 0,
+            wgpu::DeviceType::IntegratedGpu => 1,
+            wgpu::DeviceType::VirtualGpu => 2,
+            wgpu::DeviceType::Other => 3,
+            wgpu::DeviceType::Cpu => 4,
+        };
+        adapters
+            .iter()
+            .filter(|a| surface.is_none_or(|s| a.is_surface_supported(s)))
+            .filter(|a| !software_only || a.get_info().device_type == wgpu::DeviceType::Cpu)
+            .min_by_key(|a| rank(a))
+            .cloned()
+            .ok_or_else(|| {
+                let names: Vec<_> = adapters.iter().map(|a| format!("{} ({:?})", a.get_info().name, a.get_info().backend)).collect();
+                format!("no graphics adapter can draw to the window; found: {}", if names.is_empty() { "none".into() } else { names.join(", ") })
+            })
+    }));
+    WgpuConfiguration { wgpu_setup: WgpuSetup::CreateNew(setup), ..Default::default() }
 }
 
 /// Small rounded label on the canvas (positions, sizes).

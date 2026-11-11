@@ -199,6 +199,10 @@ If page backgrounds stay black on your display, its `T5LCFG.CFG` probably reads 
 pictures from another library (byte 8 of that file, e.g. 23 instead of 32). Set
 **Page library** in the PROJECT panel to match, or add your display's `T5LCFG.CFG` there.
 
+**PC without a graphics card (or a broken driver)?** UWIN Studio uses the graphics card when
+it can and falls back to Windows' built-in software renderer when it can't. If it still
+won't open, it shows the reason and saves it in `uwin-studio-error.txt` next to the exe.
+
 Known limits:
 - While typing into a number input, the digits show as `*` until you press OK.
 - Tapping a clock to set it doesn't open the keypad yet: set the clock from the MCU.
