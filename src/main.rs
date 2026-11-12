@@ -1292,6 +1292,8 @@ impl App {
         });
 
         CollapsingHeader::new("STYLE").default_open(true).show(ui, |ui| {
+            // On the screen each character is about half the text height wide.
+            let fits = (2 * w.w / w.h.max(1)).max(1);
             egui::Grid::new("style").num_columns(2).show(ui, |ui| match &mut w.kind {
                 WidgetKind::Label { text, size, color } => {
                     text_row(ui, "Text", text);
@@ -1353,6 +1355,11 @@ impl App {
                     color_row(ui, "Color", color);
                     ui.label("Font size");
                     ui.label("= height (H)");
+                    ui.end_row();
+                    ui.label("Fits");
+                    let fit = RichText::new(format!("about {fits} characters"));
+                    ui.label(if (fits as u16) < *len / if *unicode { 2 } else { 1 } { fit.color(Color32::from_rgb(250, 180, 40)) } else { fit })
+                        .on_hover_text("On the screen each character is about half the height wide. Longer texts are cut off: make the box wider or lower");
                     ui.end_row();
                     ui.label("Tap to edit");
                     ui.checkbox(input, "keyboard");

@@ -25,6 +25,8 @@ Typical job: the user gives a flow chart / list of screens and what each button 
    - Widget names must be unique in the project (they become C #defines). Use snake_case.
    - Coordinates are pixels, origin top-left. Keep widgets inside the screen and not overlapping (Panels are backgrounds and may contain others).
    - Leave "vp" null: addresses are assigned automatically. Colors are [r, g, b].
+   - Text widgets: on the screen each character is about h/2 px wide, so a box fits about 2*w/h
+     characters. Make w >= (longest text the MCU will send) * h / 2, or longer texts are cut off.
    - Layout: use the whole screen with even margins (about 24 px), line things up on a grid, centre titles,
      group related items on a Panel, make touch targets at least 60 px tall, keep navigation buttons in the
      same place on every screen, and use the default dark colors unless the user asks otherwise.

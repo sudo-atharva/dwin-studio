@@ -848,11 +848,12 @@ fn describe(p: &Project, w: &Widget, a: Option<&Alloc>) -> Option<String> {
             input.map_or(String::new(), |(lo, hi)| format!("; tap opens keypad ({lo}..{hi}), screen sends the value on OK"))
         ),
         WidgetKind::Text { len, input, unicode, .. } => format!(
-            "TEXT    VP {:#06x} ({len} bytes {}), SP {:#06x}{}",
+            "TEXT    VP {:#06x} ({len} bytes {}), SP {:#06x}{}; box shows about {} characters",
             vp(),
             if *unicode { "UTF-16BE: 2 bytes per character, end with FF FF" } else { "ASCII" },
             a.and_then(|a| a.sp).unwrap_or(0),
-            if *input { "; tap opens keyboard, screen sends the text on OK" } else { "" }
+            if *input { "; tap opens keyboard, screen sends the text on OK" } else { "" },
+            (2 * w.w / w.h.max(1)).max(1)
         ),
         WidgetKind::Toggle { bit: Some(b), .. } => format!("TOGGLE  VP {:#06x} bit {b}; tap flips the bit and sends the VP", vp()),
         WidgetKind::Toggle { .. } => format!("TOGGLE  VP {:#06x} = 0 off / 1 on; tap flips it and sends it", vp()),
