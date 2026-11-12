@@ -726,17 +726,9 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
     show.pages.retain(|_, v| !v.is_empty());
 
     let mut set = DwinSet { touch: Some(TouchFile { records: touch }), show: Some(show), icls: BTreeMap::new(), raw: BTreeMap::new() };
-    // Plain JPEGs too, like DGUS puts in DWIN_SET (NN_name.jpg).
-    for (id, img) in pages.iter().enumerate() {
-        if let Some(img) = img {
-            let name = match id {
-                i if i < npages => &p.pages[i].name,
-                i if i < total => &extras[i - npages].page.name,
-                _ => "pressed",
-            };
-            set.raw.insert(format!("{id:02}_{}.jpg", sanitize(name).to_lowercase()), img.to_jpeg()?);
-        }
-    }
+    // No loose NN_name.jpg files: the screen loads every NN-numbered file on the SD card into
+    // flash slot NN, so 00_*.jpg / 01_*.jpg overwrote the ASCII font (slots 0..11) and text
+    // showed as noise. Pages are already in the page .icl.
     if p.page_lib == p.icon_lib {
         warnings.push(format!("page and icon library are both {}.icl", p.page_lib));
     }
@@ -750,9 +742,15 @@ pub fn build(p: &Project, base: &Path) -> Result<Output, Box<dyn std::error::Err
     for (size, lib) in &unicode_fonts {
         set.raw.insert(format!("{lib}_u{size}.dzk"), crate::render::unicode_dzk(*size, p.unicode_max));
     }
+    // Byte 8 of T5LCFG.CFG = the .icl the screen takes page pictures from (32 in DGUS demos,
+    // 23 in other projects). If it differs from ours, the screen keeps showing old pages.
     if let Some(cfg) = &p.cfg {
         match std::fs::read(base.join(cfg)) {
-            Ok(b) => drop(set.raw.insert("T5LCFG.CFG".into(), b)),
+            Ok(mut b) if b.len() > 8 && b.starts_with(b"T5LC") => {
+                b[8] = p.page_lib;
+                set.raw.insert("T5LCFG.CFG".into(), b);
+            }
+            Ok(_) => warnings.push(format!("{cfg} is not a T5LCFG.CFG file: not copied")),
             Err(e) => warnings.push(format!("T5LCFG.CFG not copied ({cfg}): {e}")),
         }
     }
@@ -909,6 +907,12 @@ fn describe(p: &Project, w: &Widget, a: Option<&Alloc>) -> Option<String> {
 pub fn ui_map(p: &Project, allocs: &[Alloc]) -> String {
     let mut t = String::new();
     writeln!(t, "UWIN Studio UI map - {} x {}, {} page(s)", p.width, p.height, p.pages.len()).unwrap();
+    writeln!(
+        t,
+        "Page pictures: {}.icl. If the screen still shows its old screens after the SD update, its T5LCFG.CFG points at another library: set Page library to it, or add that T5LCFG.CFG in PROJECT.",
+        p.page_lib
+    )
+    .unwrap();
     writeln!(t, "Screen sends on touch: 5A A5 06 83 <VP hi> <VP lo> 01 <value hi> <value lo>").unwrap();
     writeln!(t, "MCU sets a value:      5A A5 05 82 <VP hi> <VP lo> <value hi> <value lo>").unwrap();
     writeln!(t, "MCU switches page:     5A A5 07 82 00 84 5A 01 <page hi> <page lo>").unwrap();
@@ -1107,6 +1111,8 @@ mod tests {
         assert!(shows[3].contains(&("vp", Value::Num(list_vp as u32 + 0x10 + 10))), "{:?}", shows[3]);
         // Text encoding as DGUS writes it (0x82: ASCII from library 0). 0x80 garbles on real screens.
         assert!(shows[3].contains(&("encode", Value::Num(0x82))), "{:?}", shows[3]);
+        // Only libraries and config files: numbered pictures would land on the font's flash slots.
+        assert!(out4.set.files().iter().all(|(n, _)| !n.ends_with(".jpg")), "no loose .jpg in DWIN_SET");
         // State icons replace the previous state (no ghosts on real screens).
         assert!(shows[1].contains(&("mode", Value::Num(1))), "{:?}", shows[1]);
         // Unicode text: own .dzk of its size from library 24, records point at it.

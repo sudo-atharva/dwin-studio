@@ -58,9 +58,21 @@ impl DwinSet {
         out
     }
 
+    /// Write all files into `dir`. Screen files left there by an earlier build (pictures,
+    /// libraries, fonts, configs we didn't write this time) are removed first: the screen would
+    /// load them from the SD card too. Other files are left alone.
     pub fn write(&self, dir: &Path) -> Res<()> {
         std::fs::create_dir_all(dir)?;
-        for (name, data) in self.files() {
+        let files = self.files();
+        let ours: std::collections::HashSet<String> = files.iter().map(|(n, _)| n.to_lowercase()).collect();
+        for e in std::fs::read_dir(dir)?.flatten() {
+            let name = e.file_name().to_string_lossy().to_lowercase();
+            let screen_file = ["icl", "jpg", "bin", "hzk", "dzk", "cfg"].iter().any(|x| name.ends_with(&format!(".{x}")));
+            if screen_file && !ours.contains(&name) && e.path().is_file() {
+                std::fs::remove_file(e.path())?;
+            }
+        }
+        for (name, data) in files {
             std::fs::write(dir.join(name), data)?;
         }
         Ok(())
